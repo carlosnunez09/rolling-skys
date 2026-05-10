@@ -42,6 +42,12 @@
 # Visual Studio cache directory
 .vs/
 
+# JetBrains Rider/IntelliJ workspace
+.idea/
+
+# Claude Code memory
+.claude/
+
 # Gradle cache directory
 .gradle/
 
