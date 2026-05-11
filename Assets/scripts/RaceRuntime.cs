@@ -3,39 +3,44 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 
+/// <summary>
+/// Central race controller. A single WaypointPath can span multiple planets —
+/// checkpoints are waypoint gates anywhere in the world.
+/// Trigger-based race starts supply the path and config directly.
+/// </summary>
 public class RaceRuntime : MonoBehaviour {
-
-    // ── Race Setup ─────────────────────────────────────────────────────────────
-
-    [Header("Race Setup")]
-    [SerializeField] WaypointPath _path;
-    [SerializeField] int _totalLaps = 3;
-    [SerializeField] float _countdownSeconds = 3f;
-    [SerializeField] bool _autoStart = true;
 
     // ── Player ─────────────────────────────────────────────────────────────────
 
     [Header("Player")]
     [SerializeField] MovingCar _playerCar;
-    [SerializeField] OrbitCamera _camera;   // referenced for future multi-cam switching
+    [SerializeField] OrbitCamera _camera;
 
     // ── HUD — TextMeshProUGUI ──────────────────────────────────────────────────
 
-    [Header("HUD")]
+    [Header("HUD — Race Info")]
+    [SerializeField] TextMeshProUGUI _trackNameText;    // "Thunder Circuit"
     [SerializeField] TextMeshProUGUI _lapText;          // "Lap  2 / 3"
     [SerializeField] TextMeshProUGUI _waypointText;     // "Checkpoint  5 / 12"
     [SerializeField] TextMeshProUGUI _remainingText;    // "Remaining  7"
     [SerializeField] TextMeshProUGUI _timeText;         // "1:23.456"
     [SerializeField] TextMeshProUGUI _positionText;     // "1st"
     [SerializeField] TextMeshProUGUI _countdownText;    // "3" "2" "1" "GO!"
-    [SerializeField] TextMeshProUGUI _statusText;       // "FINISHED!" etc.
+    [SerializeField] TextMeshProUGUI _statusText;       // "FINISHED!" / "WAITING…"
 
-    // ── Win ────────────────────────────────────────────────────────────────────
+    [Header("HUD — Next Waypoint Arrow")]
+    [Tooltip("A world-space Transform (e.g. a 3-D arrow child of the car) " +
+             "whose forward axis will be pointed toward the next checkpoint.")]
+    [SerializeField] Transform _nextWaypointArrow;
 
-    [Header("Win")]
-    [SerializeField] UnityEvent _onWin;     // hook up sound/scene/UI in the Inspector
+    // ── Events ─────────────────────────────────────────────────────────────────
 
-    // ── Public state ───────────────────────────────────────────────────────────
+    [Header("Events")]
+    [SerializeField] UnityEvent _onRaceStart;
+    [SerializeField] UnityEvent _onWin;
+    [SerializeField] UnityEvent _onRaceEnd;
+
+    // ── Public State ───────────────────────────────────────────────────────────
 
     public enum RacePhase { WaitingToStart, Countdown, Racing, Finished }
     public RacePhase Phase { get; private set; } = RacePhase.WaitingToStart;
@@ -43,62 +48,103 @@ public class RaceRuntime : MonoBehaviour {
     public RacerState Winner { get; private set; }
     public IReadOnlyList<RacerState> Racers => _racers;
 
-    // ── Per-racer data ─────────────────────────────────────────────────────────
+    /// World-space direction from the player toward the next checkpoint.
+    public Vector3 NextWaypointDirection { get; private set; } = Vector3.forward;
+
+    /// Track name supplied by the last <see cref="LoadTrackAndStart"/> call.
+    public string ActiveTrackName { get; private set; }
+
+    // ── Per-racer Data ─────────────────────────────────────────────────────────
 
     public class RacerState {
-        public string Name;
+        public string    Name;
         public MovingCar Car;
 
-        // Progress
-        public int LapCount;
-        public int LastPassedIndex = -1;   // -1 = no checkpoint crossed yet this lap
-        public bool Finished;
-        public int Position = 1;           // 1st, 2nd, … updated every frame
+        public int   LapCount;
+        public int   LastPassedIndex = -1;
+        public bool  Finished;
+        public int   Position = 1;
 
-        // Time
         public float RaceTime;
         public float FinishTime;
 
-        // Convenience: checkpoints crossed in the current lap (0 at lap start)
+        /// Total checkpoints crossed this lap (0 when none yet).
         public int CheckpointsCrossed => LastPassedIndex < 0 ? 0 : LastPassedIndex + 1;
     }
 
     // ── Private ────────────────────────────────────────────────────────────────
 
     RacerState[] _racers;
-    float _phaseTimer;
+    float        _phaseTimer;
+    WaypointPath _activePath;
+    int          _totalLaps;
+    float        _countdownSeconds;
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
-    void Start() {
-        // Build racer list — add more entries here when you introduce AI / extra players
-        _racers = new[] {
-            new RacerState { Name = "Player", Car = _playerCar }
-        };
-
-        if (_autoStart)
-            BeginCountdown();
+    void Awake () {
+        BuildRacerList();
     }
 
-    void Update() {
+    void Start () {
+        SetText(_statusText, "Drive to a start line…");
+        SetArrowVisible(false);
+        // Input is NOT disabled at startup — the car is freely drivable until a
+        // race begins.  Input is only gated during the countdown.
+    }
+
+    void Update () {
         switch (Phase) {
             case RacePhase.Countdown: TickCountdown(); break;
             case RacePhase.Racing:    TickRacing();    break;
         }
         RefreshHUD();
+        UpdateNextWaypointArrow();
     }
 
-    // ── Phase transitions ──────────────────────────────────────────────────────
+    // ── Public API ─────────────────────────────────────────────────────────────
 
-    void BeginCountdown() {
-        Phase        = RacePhase.Countdown;
-        _phaseTimer  = _countdownSeconds;
+    /// <summary>
+    /// Called by <see cref="RaceStartTrigger"/> when the player enters a start zone.
+    /// The path can span any number of planets — waypoints just need to be placed
+    /// wherever the track goes.
+    /// </summary>
+    public void LoadTrackAndStart (WaypointPath path, string trackName, int totalLaps, float countdownSeconds) {
+        if (path == null) return;
+
+        // Ignore re-entry to the same active track mid-race
+        if (Phase == RacePhase.Racing && _activePath == path) return;
+
+        ActiveTrackName   = trackName;
+        _activePath       = path;
+        _totalLaps        = Mathf.Max(1, totalLaps);
+        _countdownSeconds = Mathf.Max(1f, countdownSeconds);
+
+        ResetRacers();
+        Winner = null;
+
+        SetText(_trackNameText, trackName);
+
+        BeginCountdown();
+        _onRaceStart?.Invoke();
+    }
+
+    /// Manual start from code — mirrors the trigger-based API.
+    public void StartRaceManual (WaypointPath path, string trackName, int totalLaps = 3, float countdownSeconds = 3f)
+        => LoadTrackAndStart(path, trackName, totalLaps, countdownSeconds);
+
+    // ── Phase Transitions ──────────────────────────────────────────────────────
+
+    void BeginCountdown () {
+        Phase       = RacePhase.Countdown;
+        _phaseTimer = _countdownSeconds;
         SetCarInput(false);
-        SetText(_statusText, "");
+        SetArrowVisible(false);
+        SetText(_statusText,    "");
         SetText(_countdownText, Mathf.CeilToInt(_countdownSeconds).ToString());
     }
 
-    void TickCountdown() {
+    void TickCountdown () {
         _phaseTimer -= Time.deltaTime;
 
         if (_phaseTimer > 0f) {
@@ -111,14 +157,15 @@ public class RaceRuntime : MonoBehaviour {
         }
     }
 
-    void BeginRacing() {
+    void BeginRacing () {
         Phase = RacePhase.Racing;
         SetCarInput(true);
+        SetArrowVisible(true);
     }
 
-    // ── Race tick ──────────────────────────────────────────────────────────────
+    // ── Race Tick ──────────────────────────────────────────────────────────────
 
-    void TickRacing() {
+    void TickRacing () {
         bool anyoneActive = false;
 
         foreach (var racer in _racers) {
@@ -130,71 +177,69 @@ public class RaceRuntime : MonoBehaviour {
 
         RecalculatePositions();
 
-        if (!anyoneActive)
+        if (!anyoneActive) {
             Phase = RacePhase.Finished;
+            _onRaceEnd?.Invoke();
+        }
     }
 
-    // ── Waypoint / lap logic ───────────────────────────────────────────────────
+    // ── Waypoint / Lap Logic ───────────────────────────────────────────────────
 
-    void TickProgress(RacerState racer) {
-        if (!_path || !racer.Car) return;
+    void TickProgress (RacerState racer) {
+        if (_activePath == null || !racer.Car) return;
 
-        // The next checkpoint this racer needs to cross
         int nextIdx = racer.LastPassedIndex < 0
             ? 0
-            : _path.GetNextIndex(racer.LastPassedIndex);
+            : _activePath.GetNextIndex(racer.LastPassedIndex);
 
-        // Non-loop paths end once the last checkpoint is crossed
-        if (!_path.IsLoop && racer.LastPassedIndex >= _path.Count - 1) return;
+        // Non-loop path: stop after the last waypoint
+        if (!_activePath.IsLoop && racer.LastPassedIndex >= _activePath.Count - 1) return;
 
-        Waypoint nextWP = _path.GetWaypoint(nextIdx);
+        Waypoint nextWP = _activePath.GetWaypoint(nextIdx);
         if (!nextWP) return;
 
-        float dist = Vector3.Distance(racer.Car.transform.position, nextWP.transform.position);
-        if (dist > nextWP.Width * 0.5f) return;
+        if (!_activePath.IsInsideGate(racer.Car.transform.position, nextIdx)) return;
 
         // ── Checkpoint crossed ─────────────────────────────────────────────────
         racer.LastPassedIndex = nextIdx;
 
-        if (nextIdx == _path.Count - 1) {
-            // Completed a lap
+        bool completedLap = _activePath.IsLoop
+            ? nextIdx == 0 && racer.LastPassedIndex != -1   // wrapped back to start
+            : nextIdx == _activePath.Count - 1;              // reached final gate
+
+        // For looping paths the wrap is detected by nextIdx being the one we just set
+        // to 0 after going past Count-1.  Re-derive correctly:
+        bool wrappedAround = (_activePath.IsLoop && nextIdx == 0 && racer.LastPassedIndex == 0
+                              && racer.LapCount > 0);
+
+        // Simpler, reliable lap completion: whenever we cross the last waypoint
+        if (nextIdx == _activePath.Count - 1) {
             racer.LapCount++;
-            racer.LastPassedIndex = -1;   // reset for the next lap
+            racer.LastPassedIndex = -1;   // reset to "before first checkpoint"
 
             if (racer.LapCount >= _totalLaps)
                 FinishRacer(racer);
         }
     }
 
-    void FinishRacer(RacerState racer) {
-        racer.Finished    = true;
-        racer.FinishTime  = racer.RaceTime;
-        racer.Car.enabled = false;
+    void FinishRacer (RacerState racer) {
+        racer.Finished   = true;
+        racer.FinishTime = racer.RaceTime;
+        SetCarInput(false);
 
         if (Winner == null) {
-            // First racer to finish wins
             Winner = racer;
 
             if (racer.Car == _playerCar) {
                 SetText(_statusText, "FINISHED!");
                 _onWin?.Invoke();
-
-                // ── WIN LOGIC ─────────────────────────────────────────────────
-                // Add anything here that fires when the player completes the race.
-                // Examples:
-                //   ShowResultsScreen();
-                //   SceneManager.LoadScene("Results");
-                //   AudioSource.PlayClipAtPoint(winClip, transform.position);
-                //   PlayerPrefs.SetFloat("BestTime_" + _path.name, racer.FinishTime);
-                // ─────────────────────────────────────────────────────────────
             }
         }
     }
 
-    // ── Position ranking ───────────────────────────────────────────────────────
+    // ── Position Ranking ───────────────────────────────────────────────────────
 
-    void RecalculatePositions() {
-        // Compare every racer against every other — O(n²), fine for ≤ ~16 racers
+    void RecalculatePositions () {
         for (int i = 0; i < _racers.Length; i++) {
             int pos = 1;
             for (int j = 0; j < _racers.Length; j++) {
@@ -205,21 +250,52 @@ public class RaceRuntime : MonoBehaviour {
         }
     }
 
-    // a is considered "ahead" of b if it has more laps, or equal laps but more checkpoints
-    bool IsAheadOf(RacerState a, RacerState b) {
+    bool IsAheadOf (RacerState a, RacerState b) {
         if (a.LapCount != b.LapCount) return a.LapCount > b.LapCount;
         return a.CheckpointsCrossed > b.CheckpointsCrossed;
     }
 
-    // ── HUD refresh ────────────────────────────────────────────────────────────
+    // ── Next Waypoint Arrow ────────────────────────────────────────────────────
 
-    void RefreshHUD() {
+    void UpdateNextWaypointArrow () {
+        if (_activePath == null || _playerCar == null) return;
+
         RacerState player = PlayerState();
         if (player == null) return;
 
-        int total     = _path ? _path.Count : 0;
-        int passed    = player.CheckpointsCrossed;
-        int remaining = Mathf.Max(0, total - passed);
+        int nextIdx = player.LastPassedIndex < 0
+            ? 0
+            : _activePath.GetNextIndex(player.LastPassedIndex);
+
+        Waypoint nextWP = _activePath.GetWaypoint(nextIdx);
+        if (!nextWP) return;
+
+        Vector3 toWaypoint = nextWP.transform.position - _playerCar.transform.position;
+        if (toWaypoint.sqrMagnitude < 0.01f) return;
+
+        NextWaypointDirection = toWaypoint.normalized;
+
+        // Rotate arrow so its forward points toward the next checkpoint.
+        // We use the car's local up so the arrow tilts correctly on curved planets.
+        if (_nextWaypointArrow != null) {
+            Vector3 up = _playerCar.transform.up;
+            // Project the direction onto the plane perpendicular to the car's up so the
+            // arrow doesn't awkwardly tip for high-altitude waypoints.
+            Vector3 flat = Vector3.ProjectOnPlane(NextWaypointDirection, up);
+            if (flat.sqrMagnitude > 0.001f)
+                _nextWaypointArrow.rotation = Quaternion.LookRotation(flat.normalized, up);
+        }
+    }
+
+    // ── HUD Refresh ────────────────────────────────────────────────────────────
+
+    void RefreshHUD () {
+        RacerState player = PlayerState();
+        if (player == null) return;
+
+        int total      = _activePath ? _activePath.Count : 0;
+        int passed     = player.CheckpointsCrossed;
+        int remaining  = Mathf.Max(0, total - passed);
         int displayLap = Mathf.Min(player.LapCount + 1, _totalLaps);
 
         SetText(_lapText,       $"Lap  {displayLap} / {_totalLaps}");
@@ -229,40 +305,55 @@ public class RaceRuntime : MonoBehaviour {
         SetText(_positionText,  Ordinal(player.Position));
     }
 
-    RacerState PlayerState() {
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    void BuildRacerList () {
+        _racers = new[] {
+            new RacerState { Name = "Player", Car = _playerCar }
+        };
+    }
+
+    void ResetRacers () {
+        foreach (var r in _racers) {
+            r.LapCount        = 0;
+            r.LastPassedIndex = -1;
+            r.Finished        = false;
+            r.Position        = 1;
+            r.RaceTime        = 0f;
+            r.FinishTime      = 0f;
+        }
+    }
+
+    RacerState PlayerState () {
         foreach (var r in _racers)
             if (r.Car == _playerCar) return r;
         return _racers is { Length: > 0 } ? _racers[0] : null;
     }
 
-    // ── Utilities ──────────────────────────────────────────────────────────────
-
-    void SetCarInput(bool on) {
-        if (_playerCar) _playerCar.enabled = on;
+    /// Gate input without disabling the component so physics keeps running.
+    void SetCarInput (bool on) {
+        if (_playerCar) _playerCar.SetInputEnabled(on);
     }
 
-    static void SetText(TextMeshProUGUI tmp, string msg) {
+    /// Show or hide the 3-D waypoint arrow (hides during countdown / before race).
+    void SetArrowVisible (bool on) {
+        if (_nextWaypointArrow) _nextWaypointArrow.gameObject.SetActive(on);
+    }
+
+    static void SetText (TextMeshProUGUI tmp, string msg) {
         if (tmp) tmp.text = msg;
     }
 
-    static string FormatTime(float t) {
+    static string FormatTime (float t) {
         int   mins = (int)(t / 60f);
         float secs = t % 60f;
         return $"{mins}:{secs:00.000}";
     }
 
-    static string Ordinal(int n) => n switch {
+    static string Ordinal (int n) => n switch {
         1 => "1st",
         2 => "2nd",
         3 => "3rd",
         _ => $"{n}th"
     };
-
-    // ── Public API ─────────────────────────────────────────────────────────────
-
-    // Call from a start button / trigger if _autoStart is off
-    public void StartRace() {
-        if (Phase == RacePhase.WaitingToStart)
-            BeginCountdown();
-    }
 }
