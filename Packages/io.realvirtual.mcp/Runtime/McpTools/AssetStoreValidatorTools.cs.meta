@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 8c1602b35dab57547a86d371f10a5eb5
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpTools/AssetStoreValidatorTools.cs
+  uploadId: 878158

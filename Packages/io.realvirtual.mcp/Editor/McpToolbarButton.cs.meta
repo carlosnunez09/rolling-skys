@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: b590556d43799ab45b435f6df678e1af
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/McpToolbarButton.cs
+  uploadId: 878158

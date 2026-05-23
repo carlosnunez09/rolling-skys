@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 21d7211c8ec70eb46be4eacd5dec4050
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpTools/PrefabTools.cs
+  uploadId: 878158

@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: d06107fbf653a0a438d1ff162eb2e741
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/McpPythonDownloader.cs
+  uploadId: 878158

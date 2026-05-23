@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: d82582c6e02b5db4d89b74d54d40cdb8
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpParamAttribute.cs
+  uploadId: 878158

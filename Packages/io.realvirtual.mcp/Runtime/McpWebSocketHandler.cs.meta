@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: bf1ecc7b2ee83d64e9a361f3cda05914
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpWebSocketHandler.cs
+  uploadId: 878158

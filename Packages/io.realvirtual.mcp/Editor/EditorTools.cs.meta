@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 5a7763db0d57d8c4b83ce672be6525bb
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/EditorTools.cs
+  uploadId: 878158

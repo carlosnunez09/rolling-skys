@@ -1,4 +1,4 @@
-﻿using UnityEngine;
+using UnityEngine;
 using UnityEngine.InputSystem;
 using NaughtyAttributes;
 
@@ -35,7 +35,7 @@ public class OrbitCamera : MonoBehaviour {
 	[BoxGroup("Rotation"), SerializeField, Range(0f, 90f), Label("Smooth Range  °")]
 	float alignSmoothRange = 45f;
 
-	// Final-stage rotation damping — kills sub-frame flicker without visible lag
+	// Final-stage rotation damping — kills sub-frame flicker without visible lag.
 	[BoxGroup("Rotation"), SerializeField, Range(5f, 60f), Label("Output Smooth Speed")]
 	float rotationSmoothSpeed = 25f;
 
@@ -68,7 +68,7 @@ public class OrbitCamera : MonoBehaviour {
 	Rigidbody focusBody;
 
 	float smoothedSpeed;
-	Vector3 smoothedFocusForward = Vector3.forward;
+	Vector3 smoothedFocusForward;   // initialised from focus.forward in Awake
 
 	InputAction lookAction;
 
@@ -78,32 +78,55 @@ public class OrbitCamera : MonoBehaviour {
 
 	float lastManualRotationTime;
 
-	Quaternion gravityAlignment = Quaternion.identity;
+	Quaternion gravityAlignment = Quaternion.identity;  // overwritten in Awake
 
 	Quaternion orbitRotation;
 
 	Vector3 CameraHalfExtends {
 		get {
-			Vector3 halfExtends;
-			halfExtends.y =
-				regularCamera.nearClipPlane *
-				Mathf.Tan(0.5f * Mathf.Deg2Rad * regularCamera.fieldOfView);
-			halfExtends.x = halfExtends.y * regularCamera.aspect;
-			halfExtends.z = 0f;
-			return halfExtends;
+			Vector3 h;
+			h.y = regularCamera.nearClipPlane *
+			      Mathf.Tan(0.5f * Mathf.Deg2Rad * regularCamera.fieldOfView);
+			h.x = h.y * regularCamera.aspect;
+			h.z = 0f;
+			return h;
 		}
 	}
 
 	void OnValidate () {
-		if (maxVerticalAngle < minVerticalAngle) {
+		if (maxVerticalAngle < minVerticalAngle)
 			maxVerticalAngle = minVerticalAngle;
-		}
 	}
 
 	void Awake () {
 		regularCamera = GetComponent<Camera>();
-		focusBody = focus != null ? focus.GetComponent<Rigidbody>() : null;
+
+		if (focus == null) {
+			Debug.LogError("[OrbitCamera] No Focus transform assigned.", this);
+			enabled = false;
+			return;
+		}
+
+		focusBody  = focus.GetComponent<Rigidbody>();
 		focusPoint = focus.position;
+
+		// Initialise gravity alignment from the actual up-axis at the focus point
+		// so the camera never has to frantically correct from world-up on startup.
+		Vector3 startUp = CustomGravity.GetUpAxis(focusPoint);
+		if (startUp.sqrMagnitude > 0.001f)
+			gravityAlignment = Quaternion.FromToRotation(Vector3.up, startUp);
+
+		// Initialise the smoothed forward so AutomaticRotation doesn't sweep the
+		// camera from world-forward to the car's real heading on the first frame.
+		smoothedFocusForward = focus.forward;
+
+		// Initialise the yaw to match the car's current facing so no auto-rotation
+		// fires at the start of play.
+		Vector3 localFwd  = Quaternion.Inverse(gravityAlignment) * smoothedFocusForward;
+		Vector2 flatFwd   = new Vector2(localFwd.x, localFwd.z);
+		if (flatFwd.sqrMagnitude > 0.0001f)
+			orbitAngles.y = GetAngle(flatFwd.normalized);
+
 		transform.localRotation = orbitRotation = Quaternion.Euler(orbitAngles);
 
 		lookAction = new InputAction("Look", InputActionType.Value);
@@ -115,84 +138,91 @@ public class OrbitCamera : MonoBehaviour {
 		lookAction.AddBinding("<Gamepad>/rightStick");
 	}
 
-	void OnEnable () {
-		lookAction.Enable();
-	}
-
-	void OnDisable () {
-		lookAction.Disable();
-	}
+	void OnEnable ()  => lookAction?.Enable();
+	void OnDisable () => lookAction?.Disable();
+	void OnDestroy () => lookAction?.Dispose();
 
 	void LateUpdate () {
+		if (focus == null) return;
+
 		UpdateGravityAlignment();
 		UpdateFocusPoint();
-		if (ManualRotation() || AutomaticRotation()) {
+
+		if (ManualRotation() || AutomaticRotation())
 			ConstrainAngles();
-		}
+
 		UpdatePitchFromSpeed();
+
 		orbitRotation = Quaternion.Euler(orbitAngles);
 		Quaternion lookRotation = gravityAlignment * orbitRotation;
 
-		Vector3 lookDirection = lookRotation * Vector3.forward;
-		Vector3 lookPosition = focusPoint - lookDirection * distance;
-
-		Vector3 rectOffset = lookDirection * regularCamera.nearClipPlane;
-		Vector3 rectPosition = lookPosition + rectOffset;
-		Vector3 castFrom = focus.position;
-		Vector3 castLine = rectPosition - castFrom;
-		float castDistance = castLine.magnitude;
-		Vector3 castDirection = castLine / castDistance;
-
-		if (Physics.BoxCast(
-			castFrom, CameraHalfExtends, castDirection, out RaycastHit hit,
-			lookRotation, castDistance, obstructionMask
-		)) {
-			rectPosition = castFrom + castDirection * hit.distance;
-			lookPosition = rectPosition - rectOffset;
-		}
-		
-		// Slerp the final rotation rather than snapping — kills frame-to-frame flicker
-		// while remaining fast enough to feel instant on real turns.
+		// Smooth rotation FIRST, then derive the position from the smoothed rotation.
+		// Previously: position came from the unsmoothed lookRotation, rotation was
+		// smoothed — that mismatch made the view direction disagree with the camera's
+		// physical position every frame, causing constant jitter.
 		Quaternion smoothedRotation = Quaternion.Slerp(
 			transform.rotation, lookRotation,
 			Mathf.Clamp01(rotationSmoothSpeed * Time.deltaTime));
+
+		Vector3 lookDirection = smoothedRotation * Vector3.forward;
+		Vector3 lookPosition  = focusPoint - lookDirection * distance;
+
+		// Occlusion — box cast from the focus point toward the camera's near plane.
+		Vector3 rectOffset    = lookDirection * regularCamera.nearClipPlane;
+		Vector3 rectPosition  = lookPosition + rectOffset;
+		Vector3 castFrom      = focus.position;
+		Vector3 castLine      = rectPosition - castFrom;
+		float   castDistance  = castLine.magnitude;
+
+		if (castDistance > 0.001f) {
+			Vector3 castDirection = castLine / castDistance;
+			if (Physics.BoxCast(
+				castFrom, CameraHalfExtends, castDirection, out RaycastHit hit,
+				smoothedRotation, castDistance, obstructionMask
+			)) {
+				rectPosition = castFrom + castDirection * hit.distance;
+				lookPosition = rectPosition - rectOffset;
+			}
+		}
+
 		transform.SetPositionAndRotation(lookPosition, smoothedRotation);
 	}
 
 	void UpdateGravityAlignment () {
 		Vector3 fromUp = gravityAlignment * Vector3.up;
-		Vector3 toUp = CustomGravity.GetUpAxis(focusPoint);
-		float dot = Mathf.Clamp(Vector3.Dot(fromUp, toUp), -1f, 1f);
-		float angle = Mathf.Acos(dot) * Mathf.Rad2Deg;
+		Vector3 toUp   = CustomGravity.GetUpAxis(focusPoint);
+
+		// Guard: zero up-axis (no gravity source active) would produce NaN in
+		// FromToRotation and corrupt the alignment permanently.
+		if (toUp.sqrMagnitude < 0.001f) return;
+
+		float dot      = Mathf.Clamp(Vector3.Dot(fromUp, toUp), -1f, 1f);
+		float angle    = Mathf.Acos(dot) * Mathf.Rad2Deg;
 		float maxAngle = upAlignmentSpeed * Time.deltaTime;
 
-		Quaternion newAlignment =
-			Quaternion.FromToRotation(fromUp, toUp) * gravityAlignment;
-		if (angle <= maxAngle) {
-			gravityAlignment = newAlignment;
-		}
-		else {
-			gravityAlignment = Quaternion.SlerpUnclamped(
-				gravityAlignment, newAlignment, maxAngle / angle
-			);
-		}
+		Quaternion newAlignment = Quaternion.FromToRotation(fromUp, toUp) * gravityAlignment;
+
+		// Guard against a NaN result from degenerate input.
+		if (float.IsNaN(newAlignment.x) || float.IsNaN(newAlignment.y) ||
+		    float.IsNaN(newAlignment.z) || float.IsNaN(newAlignment.w)) return;
+
+		gravityAlignment = angle <= maxAngle
+			? newAlignment
+			: Quaternion.SlerpUnclamped(gravityAlignment, newAlignment, maxAngle / angle);
 	}
 
 	void UpdateFocusPoint () {
 		previousFocusPoint = focusPoint;
 		Vector3 targetPoint = focus.position;
 		if (focusRadius > 0f) {
-			float distance = Vector3.Distance(targetPoint, focusPoint);
+			float dist = Vector3.Distance(targetPoint, focusPoint);
 			float t = 1f;
-			if (distance > 0.01f && focusCentering > 0f) {
+			if (dist > 0.01f && focusCentering > 0f)
 				t = Mathf.Pow(1f - focusCentering, Time.unscaledDeltaTime);
-			}
-			if (distance > focusRadius) {
-				t = Mathf.Min(t, focusRadius / distance);
-			}
+			if (dist > focusRadius)
+				t = Mathf.Min(t, focusRadius / dist);
 			focusPoint = Vector3.Lerp(targetPoint, focusPoint, t);
-		}
-		else {
+		} else {
 			focusPoint = targetPoint;
 		}
 	}
@@ -201,7 +231,7 @@ public class OrbitCamera : MonoBehaviour {
 		float x = lookAction.ReadValue<Vector2>().x;
 		const float e = 0.001f;
 		if (x < -e || x > e) {
-			orbitAngles.y += rotationSpeed * Time.unscaledDeltaTime * x;
+			orbitAngles.y         += rotationSpeed * Time.unscaledDeltaTime * x;
 			lastManualRotationTime = Time.unscaledTime;
 			return true;
 		}
@@ -210,53 +240,47 @@ public class OrbitCamera : MonoBehaviour {
 
 	void UpdatePitchFromSpeed () {
 		float rawSpeed = focusBody != null ? focusBody.linearVelocity.magnitude : 0f;
-		// Dead-zone: physics solver produces noise up to ~0.5 m/s even when stopped.
-		// Only start tracking speed once the car is clearly moving.
+		// Dead-zone: physics solver noise up to ~0.5 m/s when stopped.
 		if (rawSpeed < 1f) rawSpeed = 0f;
 		smoothedSpeed = Mathf.Lerp(smoothedSpeed, rawSpeed, 3f * Time.deltaTime);
-		if (smoothedSpeed < 0.05f) smoothedSpeed = 0f; // hard-stop residual drift
-		float t = Mathf.Clamp01(smoothedSpeed / speedForFullAngle);
+		if (smoothedSpeed < 0.05f) smoothedSpeed = 0f;
+
+		float t           = Mathf.Clamp01(smoothedSpeed / speedForFullAngle);
 		float targetPitch = Mathf.Lerp(topDownAngle, behindAngle, t);
-		orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetPitch, pitchSmoothSpeed * Time.deltaTime);
+		orbitAngles.x     = Mathf.Lerp(orbitAngles.x, targetPitch, pitchSmoothSpeed * Time.deltaTime);
 	}
 
 	bool AutomaticRotation () {
-		if (Time.unscaledTime - lastManualRotationTime < alignDelay) {
+		if (Time.unscaledTime - lastManualRotationTime < alignDelay)
 			return false;
-		}
 
-		// Smooth the car's facing direction so discrete physics rotations don't jitter the yaw
-		smoothedFocusForward = Vector3.Slerp(smoothedFocusForward, focus.forward, 12f * Time.unscaledDeltaTime);
+		// Smooth the car's facing direction so discrete physics rotations don't
+		// jitter the auto-yaw tracking.
+		smoothedFocusForward = Vector3.Slerp(
+			smoothedFocusForward, focus.forward, 12f * Time.unscaledDeltaTime);
+
 		Vector3 facingAligned = Quaternion.Inverse(gravityAlignment) * smoothedFocusForward;
 		Vector2 headingVector = new Vector2(facingAligned.x, facingAligned.z);
 
-		if (headingVector.sqrMagnitude < 0.0001f) {
+		if (headingVector.sqrMagnitude < 0.0001f)
 			return false;
-		}
 
-		float headingAngle = GetAngle(headingVector.normalized);
-		float deltaAbs = Mathf.Abs(Mathf.DeltaAngle(orbitAngles.y, headingAngle));
+		float headingAngle   = GetAngle(headingVector.normalized);
+		float deltaAbs       = Mathf.Abs(Mathf.DeltaAngle(orbitAngles.y, headingAngle));
 		float rotationChange = rotationSpeed * Time.unscaledDeltaTime;
-		if (deltaAbs < alignSmoothRange) {
+		if (deltaAbs < alignSmoothRange)
 			rotationChange *= deltaAbs / alignSmoothRange;
-		}
-		else if (180f - deltaAbs < alignSmoothRange) {
+		else if (180f - deltaAbs < alignSmoothRange)
 			rotationChange *= (180f - deltaAbs) / alignSmoothRange;
-		}
+
 		orbitAngles.y = Mathf.MoveTowardsAngle(orbitAngles.y, headingAngle, rotationChange);
 		return true;
 	}
 
 	void ConstrainAngles () {
-		orbitAngles.x =
-			Mathf.Clamp(orbitAngles.x, minVerticalAngle, maxVerticalAngle);
-
-		if (orbitAngles.y < 0f) {
-			orbitAngles.y += 360f;
-		}
-		else if (orbitAngles.y >= 360f) {
-			orbitAngles.y -= 360f;
-		}
+		orbitAngles.x = Mathf.Clamp(orbitAngles.x, minVerticalAngle, maxVerticalAngle);
+		if      (orbitAngles.y <   0f) orbitAngles.y += 360f;
+		else if (orbitAngles.y >= 360f) orbitAngles.y -= 360f;
 	}
 
 	static float GetAngle (Vector2 direction) {

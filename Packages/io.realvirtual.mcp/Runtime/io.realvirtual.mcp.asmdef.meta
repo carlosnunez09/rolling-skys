@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 8ddf83baca65f864da151f729778a0eb
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/io.realvirtual.mcp.asmdef
+  uploadId: 878158

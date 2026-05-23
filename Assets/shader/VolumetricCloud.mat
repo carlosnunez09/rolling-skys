@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: VolumetricCloud
+  m_Shader: {fileID: 4800000, guid: e03e438df9eae0b4f8c482e611f056fd, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 1
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _BumpAmount: 0.5
+    - _DarknessThreshold: 0.15
+    - _Density: 0.744
+    - _DensityThreshold: 0.463
+    - _EdgeFade: 0.274
+    - _EdgeNoise: 0.65
+    - _EdgeSharpness: 0.3
+    - _Gain: 0.5
+    - _Lacunarity: 2
+    - _LightAbsorption: 1.46
+    - _NoiseScale: 2.5
+    - _NoiseSpeed: 0.05
+    - _OctaveCount: 4
+    - _StepSize: 0.227
+    - _Steps: 4.71
+    - _VolDepth: 0.18
+    m_Colors:
+    - _CloudColor: {r: 1.2, g: 1.2, b: 1.2, a: 1}
+    - _ShadowColor: {r: 0.58, g: 0.7, b: 0.92, a: 1}
+    - _SkyColor: {r: 0.6367924, g: 0.7908805, b: 1, a: 1}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1

@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 44a2daf90bed4a749b01ed5a30e4bd1f
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestMcpToolSchemaGeneration.cs
+  uploadId: 878158

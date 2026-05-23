@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 186b862cb14861540b6a2030977947a8
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/CHANGELOG.md
+  uploadId: 878158

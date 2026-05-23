@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: cadf3a6e9308904439c870ccefcef7a9
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestMcpDeployerIdempotent.cs
+  uploadId: 878158

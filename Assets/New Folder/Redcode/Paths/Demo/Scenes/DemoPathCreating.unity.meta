@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d0ed04641cbc4a248a5937590b403d26
+DefaultImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 214353
+  packageName: Paths - Simple Waypoint System
+  packageVersion: 1.0.6f
+  assetPath: Assets/Redcode/Paths/Demo/Scenes/DemoPathCreating.unity
+  uploadId: 492997

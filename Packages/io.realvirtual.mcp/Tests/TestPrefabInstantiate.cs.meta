@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: b0a1e2c5fcb91e64fba2ec9f3b79c60d
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestPrefabInstantiate.cs
+  uploadId: 878158

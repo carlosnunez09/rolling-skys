@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 123530c015151e944a2a3eb058515361
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestGameObjectDestroy.cs
+  uploadId: 878158

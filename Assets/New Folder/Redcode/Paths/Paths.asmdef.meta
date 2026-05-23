@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: f6ddd9657b8fa5d4092264fe3a9866ed
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 214353
+  packageName: Paths - Simple Waypoint System
+  packageVersion: 1.0.6f
+  assetPath: Assets/Redcode/Paths/Paths.asmdef
+  uploadId: 492997

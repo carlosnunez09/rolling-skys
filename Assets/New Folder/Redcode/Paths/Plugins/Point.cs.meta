@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 3d1223a975eaaec448968df953c27322
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 214353
+  packageName: Paths - Simple Waypoint System
+  packageVersion: 1.0.6f
+  assetPath: Assets/Redcode/Paths/Plugins/Point.cs
+  uploadId: 492997

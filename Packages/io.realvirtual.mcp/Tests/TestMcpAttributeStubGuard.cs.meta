@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 9e8b63854238f5e4ebf51a68a8d35d7e
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestMcpAttributeStubGuard.cs
+  uploadId: 878158

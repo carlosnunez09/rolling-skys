@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 2e7084f016a18964a90b26a200dac04d
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/McpEditorBridge.cs
+  uploadId: 878158

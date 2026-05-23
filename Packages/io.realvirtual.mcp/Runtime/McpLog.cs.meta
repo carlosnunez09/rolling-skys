@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 479e674fc257abe458f7f438db3ce72b
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpLog.cs
+  uploadId: 878158

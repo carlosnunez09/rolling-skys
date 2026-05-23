@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 00310048b9e2f2f41a17886f6ada66a3
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/Serialization/ReflectionCache.cs
+  uploadId: 878158

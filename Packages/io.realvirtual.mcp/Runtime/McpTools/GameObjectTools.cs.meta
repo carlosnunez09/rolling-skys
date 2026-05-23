@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 8a766bf6c988fa643a176b9e9f014c86
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Runtime/McpTools/GameObjectTools.cs
+  uploadId: 878158

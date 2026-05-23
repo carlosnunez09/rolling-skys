@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 9c85a190678ae6345be92ece5a1d0b09
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/McpToolbarPopup.cs
+  uploadId: 878158

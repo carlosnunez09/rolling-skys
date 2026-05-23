@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 1a99248dae7eb46419e596460cb0eb62
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/io.realvirtual.mcp.tests.asmdef
+  uploadId: 878158

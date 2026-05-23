@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: a0c1de4664289f349afc5585751c9e9c
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/io.realvirtual.mcp.editor.asmdef
+  uploadId: 878158

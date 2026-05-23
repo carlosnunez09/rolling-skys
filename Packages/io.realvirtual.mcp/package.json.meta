@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 1c026792442f59646ad4ab8c655c2710
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/package.json
+  uploadId: 878158

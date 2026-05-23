@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: e67b9eb3d73b6e5468705a0c9c73fc10
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestTransformWithRigidbody.cs
+  uploadId: 878158

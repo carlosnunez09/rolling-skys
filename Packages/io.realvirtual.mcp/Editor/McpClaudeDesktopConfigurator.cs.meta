@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: a64a36e070e685a439f6ce7f4f4f22a9
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Editor/McpClaudeDesktopConfigurator.cs
+  uploadId: 878158

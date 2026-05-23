@@ -1,0 +1,9 @@
+fileFormatVersion: 2
+guid: 96331b244ab9a3e43936e11e7dae1c6b
+AssetOrigin:
+  serializedVersion: 1
+  productId: 361912
+  packageName: realvirtual.io MCP Server
+  packageVersion: 1.0.2
+  assetPath: Packages/io.realvirtual.mcp/Tests/TestMcpSceneFindAndComponents.cs
+  uploadId: 878158
