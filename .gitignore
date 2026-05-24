@@ -112,6 +112,9 @@ InitTestScene*.unity*
 # Auto-generated scenes by play mode tests
 /[Aa]ssets/[Ii]nit[Tt]est[Ss]cene*.unity*
 
+# macOS-only fix: websocket-sharp plugin importer meta (Windows requires different import settings)
+Packages/io.realvirtual.mcp/Runtime/Plugins/websocket-sharp.dll.meta
+
 # Local MCP runtime/config and credentials
 /.mcp.json
 /[Aa]ssets/.mcp_auth_token

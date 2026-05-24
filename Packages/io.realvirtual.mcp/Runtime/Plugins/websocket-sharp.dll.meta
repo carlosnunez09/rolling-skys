@@ -1,9 +1,0 @@
-fileFormatVersion: 2
-guid: 3d9e6920e2cffa64c8bc8ebda9bd17c0
-AssetOrigin:
-  serializedVersion: 1
-  productId: 361912
-  packageName: realvirtual.io MCP Server
-  packageVersion: 1.0.2
-  assetPath: Packages/io.realvirtual.mcp/Runtime/Plugins/websocket-sharp.dll
-  uploadId: 878158
