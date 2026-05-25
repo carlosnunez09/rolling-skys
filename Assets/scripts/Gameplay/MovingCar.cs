@@ -211,6 +211,13 @@ public class MovingCar : MonoBehaviour {
 	float prevSpeed;
 	float prevYawVelocity;
 
+	// Smoothed values used only for inspector display — decoupled from gameplay physics.
+	float _smoothSpeed;
+	float _smoothFwdSpeed;
+	float _smoothLatSpeed;
+	float _smoothYawRate;
+	float _smoothAccel;
+
 	// Surface friction — accumulated from SurfaceFriction components on contact objects.
 	// 1 = normal grip, 0 = frictionless ice.  Reset each physics step in ClearState.
 	float _groundFriction      = 1f;
@@ -559,29 +566,36 @@ public class MovingCar : MonoBehaviour {
 	}
 
 	void UpdateStats (Vector3 gravity, bool isDrifting, float fwdSpeed, float latSpeed, float currentSpeed) {
-		// Acceleration: guard against frame-time spikes (editor selection, hitches)
-		// by clamping the raw delta before displaying it.
 		float rawAccel      = (currentSpeed - prevSpeed) / Time.fixedDeltaTime;
-		statAcceleration    = Mathf.Clamp(rawAccel, -200f, 200f);
 		statYawAcceleration = (yawVelocity - prevYawVelocity) / Time.fixedDeltaTime;
 		prevSpeed           = currentSpeed;
 		prevYawVelocity     = yawVelocity;
 
-		// Snap to zero below 0.5 m/s so physics solver noise doesn't show as movement
+		// EMA smoothing for inspector display — prevents the values from flickering when
+		// the object is selected or Gizmos are on (which forces constant Inspector repaints).
+		// Gameplay physics uses local fwdSpeed/velocity directly, not these stat fields.
 		const float displayThreshold = 0.5f;
-		statSpeed        = currentSpeed < displayThreshold ? 0f : currentSpeed;
-		statForwardSpeed = Mathf.Abs(fwdSpeed) < displayThreshold ? 0f : fwdSpeed;
-		statLateralSpeed = Mathf.Abs(latSpeed) < displayThreshold ? 0f : latSpeed;
-		statYawRate        = yawVelocity;
-		statGrounded       = OnGround;
-		statDrifting       = isDrifting && OnGround;
-		statLandingSlip    = landingSlip;
-		statGroundAngle    = OnGround ? Vector3.Angle(gravityCar.UpAxis, contactNormal) : 0f;
-		statGravityMagnitude = gravity.magnitude;
-		statGravityUpAxis  = gravityCar.UpAxis;
-		statGravitySource  = CustomGravity.GetDominantSourceName(body.position);
+		float       a                = 15f * Time.fixedDeltaTime; // ~67 ms time constant
 
-		// Check if there is a Rigidbody directly beneath the car
+		_smoothAccel    = Mathf.Lerp(_smoothAccel,    Mathf.Clamp(rawAccel, -200f, 200f), a);
+		_smoothSpeed    = Mathf.Lerp(_smoothSpeed,    currentSpeed, a);
+		_smoothFwdSpeed = Mathf.Lerp(_smoothFwdSpeed, fwdSpeed,     a);
+		_smoothLatSpeed = Mathf.Lerp(_smoothLatSpeed, latSpeed,     a);
+		_smoothYawRate  = Mathf.Lerp(_smoothYawRate,  yawVelocity,  a);
+
+		statAcceleration = _smoothAccel;
+		statSpeed        = _smoothSpeed    < displayThreshold               ? 0f : _smoothSpeed;
+		statForwardSpeed = Mathf.Abs(_smoothFwdSpeed) < displayThreshold    ? 0f : _smoothFwdSpeed;
+		statLateralSpeed = Mathf.Abs(_smoothLatSpeed) < displayThreshold    ? 0f : _smoothLatSpeed;
+		statYawRate      = _smoothYawRate;
+		statGrounded     = OnGround;
+		statDrifting     = isDrifting && OnGround;
+		statLandingSlip  = landingSlip;
+		statGroundAngle  = OnGround ? Vector3.Angle(gravityCar.UpAxis, contactNormal) : 0f;
+		statGravityMagnitude = gravity.magnitude;
+		statGravityUpAxis    = gravityCar.UpAxis;
+		statGravitySource    = CustomGravity.GetDominantSourceName(body.position);
+
 		statRigidbodyBelow = Physics.Raycast(body.position, -gravityCar.UpAxis, out RaycastHit hit, probeDistance * 2f)
 			&& hit.rigidbody != null;
 	}

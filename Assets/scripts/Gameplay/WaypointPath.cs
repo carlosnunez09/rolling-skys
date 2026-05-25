@@ -3,10 +3,12 @@ using System.Collections.Generic;
 
 public class WaypointPath : MonoBehaviour {
 
-    [SerializeField] List<Waypoint> _waypoints = new List<Waypoint>();
-    [SerializeField] bool _isLoop = true;
-    [SerializeField] Color _pathColor = Color.green;
-    [SerializeField] Color _gateColor = new Color(0f, 1f, 0.5f);
+    [SerializeField] List<Waypoint> _waypoints       = new List<Waypoint>();
+    [SerializeField] bool           _isLoop           = true;
+    [SerializeField] Color          _pathColor        = Color.green;
+    [SerializeField] Color          _gateColor        = new Color(0f, 1f, 0.5f);
+    [Tooltip("Default overshoot radius applied to every new waypoint added to this path.")]
+    [SerializeField] float          _defaultOvershoot = 0f;
 
     public int Count => _waypoints.Count;
     public bool IsLoop => _isLoop;
@@ -55,7 +57,7 @@ public class WaypointPath : MonoBehaviour {
     public bool IsInsideGate(Vector3 position, int waypointIndex) {
         Waypoint wp = GetWaypoint(waypointIndex);
         if (!wp) return false;
-        return Vector3.Distance(position, wp.transform.position) <= wp.Width * 0.5f;
+        return Vector3.Distance(position, wp.transform.position) <= wp.DetectionRadius;
     }
 
     // ── Editing (used by the editor tool at runtime too) ─────────────────────
@@ -67,6 +69,7 @@ public class WaypointPath : MonoBehaviour {
         go.transform.up = upAxis.sqrMagnitude > 0.01f ? upAxis : Vector3.up;
 
         Waypoint wp = go.AddComponent<Waypoint>();
+        wp.OvershootRadius = _defaultOvershoot;
         _waypoints.Add(wp);
         RenumberAll();
         return wp;

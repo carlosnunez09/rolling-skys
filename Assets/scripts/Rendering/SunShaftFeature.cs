@@ -145,9 +145,6 @@ internal sealed class SunShaftPass : ScriptableRenderPass, IDisposable
         }
     }
 
-    // Legacy path — not used with RenderGraph but required by the interface
-    public override void Execute(ScriptableRenderContext context, ref RenderingData renderingData) { }
-
     public void Dispose()
     {
         CoreUtils.Destroy(_material);

@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEditor;
 
@@ -5,26 +6,70 @@ using UnityEditor;
 public class WaypointPathEditor : Editor {
 
     WaypointPath _path;
-    bool _isPlacing;
+    bool         _isPlacing;
+
+    // ── Planet picker ─────────────────────────────────────────────────────────
+    Planet   _targetPlanet;
+    Planet[] _scenePlanets = Array.Empty<Planet>();
+    string[] _planetNames  = Array.Empty<string>();
+    int      _pickerIndex  = 0;
 
     static readonly Color _btnOnColor  = new Color(1f, 0.35f, 0.35f);
     static readonly Color _btnOffColor = new Color(0.35f, 1f, 0.45f);
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    void OnEnable() {
+    void OnEnable () {
         _path = (WaypointPath)target;
+        ScanForPlanets();
     }
 
-    void OnDisable() {
+    void OnDisable () {
         _isPlacing = false;
     }
 
     // ── Inspector ─────────────────────────────────────────────────────────────
 
-    public override void OnInspectorGUI() {
+    public override void OnInspectorGUI () {
         DrawDefaultInspector();
 
+        // ── Planet picker ─────────────────────────────────────────────────────
+        EditorGUILayout.Space(10);
+        EditorGUILayout.LabelField("Planet (for gravity alignment)", EditorStyles.boldLabel);
+
+        // Drag-and-drop field
+        EditorGUI.BeginChangeCheck();
+        var dragged = (Planet)EditorGUILayout.ObjectField("Target Planet", _targetPlanet, typeof(Planet), true);
+        if (EditorGUI.EndChangeCheck()) {
+            _targetPlanet = dragged;
+            SyncPickerIndex();
+        }
+
+        // Scan + dropdown row
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Scan Scene", GUILayout.Width(90))) {
+            ScanForPlanets();
+        }
+
+        if (_scenePlanets.Length > 0) {
+            EditorGUI.BeginChangeCheck();
+            int newIdx = EditorGUILayout.Popup(_pickerIndex, _planetNames);
+            if (EditorGUI.EndChangeCheck()) {
+                _pickerIndex  = newIdx;
+                _targetPlanet = _scenePlanets[newIdx];
+            }
+        } else {
+            EditorGUILayout.LabelField("No Planet components found in scene.");
+        }
+        EditorGUILayout.EndHorizontal();
+
+        if (_targetPlanet != null) {
+            EditorGUILayout.HelpBox($"Aligning to: {_targetPlanet.PlanetName}", MessageType.None);
+        } else {
+            EditorGUILayout.HelpBox("No planet selected — alignment falls back to nearest gravity sphere.", MessageType.Warning);
+        }
+
+        // ── Placement tools ───────────────────────────────────────────────────
         EditorGUILayout.Space(10);
         EditorGUILayout.LabelField("Placement Tools", EditorStyles.boldLabel);
 
@@ -39,7 +84,7 @@ public class WaypointPathEditor : Editor {
         GUI.backgroundColor = Color.white;
 
         if (_isPlacing)
-            EditorGUILayout.HelpBox("Click any surface in the Scene view to drop a waypoint. Waypoints auto-align to the planet's gravity.", MessageType.Info);
+            EditorGUILayout.HelpBox("Click any surface in the Scene view to drop a waypoint.", MessageType.Info);
 
         EditorGUILayout.Space(4);
         EditorGUILayout.BeginHorizontal();
@@ -52,7 +97,7 @@ public class WaypointPathEditor : Editor {
                 ClearAll();
         }
 
-        // Waypoint list
+        // ── Waypoint list ─────────────────────────────────────────────────────
         EditorGUILayout.Space(10);
         EditorGUILayout.LabelField($"Waypoints  ({_path.Count})", EditorStyles.boldLabel);
 
@@ -90,13 +135,12 @@ public class WaypointPathEditor : Editor {
 
     // ── Scene GUI ─────────────────────────────────────────────────────────────
 
-    void OnSceneGUI() {
+    void OnSceneGUI () {
         if (!_path) return;
 
         Event e = Event.current;
 
         if (_isPlacing) {
-            // ESC cancels placement
             if (e.type == EventType.KeyDown && e.keyCode == KeyCode.Escape) {
                 _isPlacing = false;
                 e.Use();
@@ -104,23 +148,19 @@ public class WaypointPathEditor : Editor {
                 return;
             }
 
-            // Grab scene input so clicks don't deselect the path object
             int id = GUIUtility.GetControlID(FocusType.Passive);
             if (e.type == EventType.Layout)
                 HandleUtility.AddDefaultControl(id);
 
             // Overlay banner
             Handles.BeginGUI();
-            var style = new GUIStyle(GUI.skin.box) {
-                fontSize = 12,
-                alignment = TextAnchor.MiddleCenter
-            };
+            var style = new GUIStyle(GUI.skin.box) { fontSize = 12, alignment = TextAnchor.MiddleCenter };
             style.normal.textColor = Color.yellow;
-            float bw = 330, bh = 26;
-            GUI.Box(new Rect(8, 8, bw, bh), "Waypoint Placement Mode  —  Click surface  |  ESC to stop", style);
+            string planetLabel = _targetPlanet != null ? $"  Planet: {_targetPlanet.PlanetName}" : "  No planet selected";
+            GUI.Box(new Rect(8, 8, 380, 26),
+                $"Waypoint Placement  —  Click surface  |  ESC to stop  |{planetLabel}", style);
             Handles.EndGUI();
 
-            // Place on left click
             if (e.type == EventType.MouseDown && e.button == 0) {
                 Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
                 if (Physics.Raycast(ray, out RaycastHit hit)) {
@@ -138,7 +178,6 @@ public class WaypointPathEditor : Editor {
             Waypoint wp = _path.Waypoints[i];
             if (!wp) continue;
 
-            // Index label floating above the post
             Handles.Label(
                 wp.transform.position + wp.transform.up * 3.5f,
                 $" {i}",
@@ -149,7 +188,6 @@ public class WaypointPathEditor : Editor {
                 }
             );
 
-            // Drag handle
             EditorGUI.BeginChangeCheck();
             Vector3 newPos = Handles.PositionHandle(wp.transform.position, Quaternion.identity);
             if (EditorGUI.EndChangeCheck()) {
@@ -161,34 +199,41 @@ public class WaypointPathEditor : Editor {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Planet helpers ────────────────────────────────────────────────────────
 
-    void RemoveLast() {
-        if (_path.Count == 0) return;
-        Undo.RecordObject(_path, "Remove Last Waypoint");
-        _path.RemoveWaypoint(_path.Count - 1);
-        EditorUtility.SetDirty(_path);
+    void ScanForPlanets () {
+#if UNITY_2023_1_OR_NEWER
+        _scenePlanets = FindObjectsByType<Planet>(FindObjectsSortMode.None);
+#else
+        _scenePlanets = FindObjectsOfType<Planet>();
+#endif
+        _planetNames = new string[_scenePlanets.Length];
+        for (int i = 0; i < _scenePlanets.Length; i++)
+            _planetNames[i] = $"{_scenePlanets[i].PlanetName}  ({_scenePlanets[i].gameObject.name})";
+
+        SyncPickerIndex();
     }
 
-    void AlignAll() {
-        Undo.RecordObject(_path, "Align Waypoints to Gravity");
-        _path.AlignAllToGravity();
-        EditorUtility.SetDirty(_path);
+    void SyncPickerIndex () {
+        _pickerIndex = 0;
+        if (_targetPlanet == null) return;
+        for (int i = 0; i < _scenePlanets.Length; i++) {
+            if (_scenePlanets[i] == _targetPlanet) { _pickerIndex = i; return; }
+        }
     }
 
-    void ClearAll() {
-        Undo.RecordObject(_path, "Clear All Waypoints");
-        while (_path.Count > 0)
-            _path.RemoveWaypoint(0);
-        EditorUtility.SetDirty(_path);
-    }
+    // ── Gravity helpers ───────────────────────────────────────────────────────
 
-    // Tries the live gravity system first; falls back to the nearest GravitySphere
-    // in the scene (needed in edit mode before play, when sources aren't registered).
-    static Vector3 GetUpAxisAt(Vector3 position) {
+    Vector3 GetUpAxisAt (Vector3 position) {
+        // Prefer the explicitly selected planet.
+        if (_targetPlanet != null)
+            return (_targetPlanet.SurfaceNormal(position));
+
+        // Try live gravity system (works in Play mode).
         Vector3 up = CustomGravity.GetUpAxis(position);
         if (up.sqrMagnitude > 0.01f) return up;
 
+        // Edit-mode fallback: nearest GravitySphere in scene.
         GravitySphere[] spheres = FindObjectsOfType<GravitySphere>();
         GravitySphere nearest = null;
         float minDist = float.MaxValue;
@@ -200,5 +245,33 @@ public class WaypointPathEditor : Editor {
         return nearest
             ? (position - nearest.transform.position).normalized
             : Vector3.up;
+    }
+
+    // ── Toolbar helpers ───────────────────────────────────────────────────────
+
+    void RemoveLast () {
+        if (_path.Count == 0) return;
+        Undo.RecordObject(_path, "Remove Last Waypoint");
+        _path.RemoveWaypoint(_path.Count - 1);
+        EditorUtility.SetDirty(_path);
+    }
+
+    void AlignAll () {
+        Undo.RecordObject(_path, "Align Waypoints to Gravity");
+        if (_targetPlanet != null) {
+            foreach (Waypoint wp in _path.Waypoints)
+                if (wp) wp.transform.up = _targetPlanet.SurfaceNormal(wp.transform.position);
+            EditorUtility.SetDirty(_path);
+        } else {
+            _path.AlignAllToGravity();
+            EditorUtility.SetDirty(_path);
+        }
+    }
+
+    void ClearAll () {
+        Undo.RecordObject(_path, "Clear All Waypoints");
+        while (_path.Count > 0)
+            _path.RemoveWaypoint(0);
+        EditorUtility.SetDirty(_path);
     }
 }

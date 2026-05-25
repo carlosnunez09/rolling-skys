@@ -12,7 +12,7 @@ GameObject:
   - component: {fileID: 6226802169434390274}
   - component: {fileID: 703009240698753843}
   - component: {fileID: 511728313589335422}
-  m_Layer: 0
+  m_Layer: 6
   m_Name: CloudSphere
   m_TagString: Untagged
   m_Icon: {fileID: 0}

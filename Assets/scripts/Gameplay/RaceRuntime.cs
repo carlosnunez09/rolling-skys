@@ -33,6 +33,14 @@ public class RaceRuntime : MonoBehaviour {
              "whose forward axis will be pointed toward the next checkpoint.")]
     [SerializeField] Transform _nextWaypointArrow;
 
+    // ── Checkpoint Markers ─────────────────────────────────────────────────────
+
+    [Header("Checkpoint Markers")]
+    [Tooltip("Prefab to spawn above each checkpoint while racing.")]
+    [SerializeField] GameObject _checkpointMarkerPrefab;
+    [Tooltip("Height above the waypoint's local up axis to place the marker.")]
+    [SerializeField] float _checkpointMarkerHeight = 5f;
+
     // ── Events ─────────────────────────────────────────────────────────────────
 
     [Header("Events")]
@@ -43,13 +51,15 @@ public class RaceRuntime : MonoBehaviour {
     // ── Public State ───────────────────────────────────────────────────────────
 
     public enum RacePhase { WaitingToStart, Countdown, Racing, Finished }
-    public RacePhase Phase { get; private set; } = RacePhase.WaitingToStart;
+    public RacePhase   Phase      { get; private set; } = RacePhase.WaitingToStart;
+    public WaypointPath ActivePath { get; private set; }
 
     public RacerState Winner { get; private set; }
     public IReadOnlyList<RacerState> Racers => _racers;
 
     /// World-space direction from the player toward the next checkpoint.
-    public Vector3 NextWaypointDirection { get; private set; } = Vector3.forward;
+    public Vector3 NextWaypointDirection   { get; private set; } = Vector3.forward;
+    public int     PlayerNextWaypointIndex { get; private set; } = 0;
 
     /// Track name supplied by the last <see cref="LoadTrackAndStart"/> call.
     public string ActiveTrackName { get; private set; }
@@ -79,6 +89,7 @@ public class RaceRuntime : MonoBehaviour {
     WaypointPath _activePath;
     int          _totalLaps;
     float        _countdownSeconds;
+    readonly List<GameObject> _checkpointMarkers = new List<GameObject>();
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -117,6 +128,7 @@ public class RaceRuntime : MonoBehaviour {
 
         ActiveTrackName   = trackName;
         _activePath       = path;
+        ActivePath        = path;
         _totalLaps        = Mathf.Max(1, totalLaps);
         _countdownSeconds = Mathf.Max(1f, countdownSeconds);
 
@@ -161,6 +173,7 @@ public class RaceRuntime : MonoBehaviour {
         Phase = RacePhase.Racing;
         SetCarInput(true);
         SetArrowVisible(true);
+        SpawnCheckpointMarkers();
     }
 
     // ── Race Tick ──────────────────────────────────────────────────────────────
@@ -178,6 +191,7 @@ public class RaceRuntime : MonoBehaviour {
         RecalculatePositions();
 
         if (!anyoneActive) {
+            RemoveCheckpointMarkers();
             Phase = RacePhase.Finished;
             _onRaceEnd?.Invoke();
         }
@@ -267,6 +281,8 @@ public class RaceRuntime : MonoBehaviour {
             ? 0
             : _activePath.GetNextIndex(player.LastPassedIndex);
 
+        PlayerNextWaypointIndex = nextIdx;
+
         Waypoint nextWP = _activePath.GetWaypoint(nextIdx);
         if (!nextWP) return;
 
@@ -305,9 +321,35 @@ public class RaceRuntime : MonoBehaviour {
         SetText(_positionText,  Ordinal(player.Position));
     }
 
+    // ── Checkpoint Marker Lifecycle ────────────────────────────────────────────
+
+    void SpawnCheckpointMarkers () {
+        RemoveCheckpointMarkers();
+        if (_checkpointMarkerPrefab == null || _activePath == null) return;
+
+        foreach (Waypoint wp in _activePath.Waypoints) {
+            if (!wp) continue;
+            Vector3 spawnPos = wp.transform.position + wp.transform.up * _checkpointMarkerHeight;
+            GameObject marker = Instantiate(_checkpointMarkerPrefab, spawnPos, wp.transform.rotation);
+            marker.transform.SetParent(wp.transform, true);
+            _checkpointMarkers.Add(marker);
+        }
+    }
+
+    void RemoveCheckpointMarkers () {
+        foreach (GameObject marker in _checkpointMarkers)
+            if (marker) Destroy(marker);
+        _checkpointMarkers.Clear();
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     void BuildRacerList () {
+        if (_playerCar == null) {
+            Debug.LogError("[RaceRuntime] _playerCar is not assigned — racer list will be empty.", this);
+            _racers = System.Array.Empty<RacerState>();
+            return;
+        }
         _racers = new[] {
             new RacerState { Name = "Player", Car = _playerCar }
         };
@@ -325,9 +367,10 @@ public class RaceRuntime : MonoBehaviour {
     }
 
     RacerState PlayerState () {
+        if (_racers == null || _playerCar == null) return null;
         foreach (var r in _racers)
-            if (r.Car == _playerCar) return r;
-        return _racers is { Length: > 0 } ? _racers[0] : null;
+            if (r != null && r.Car == _playerCar) return r;
+        return _racers.Length > 0 ? _racers[0] : null;
     }
 
     /// Gate input without disabling the component so physics keeps running.

@@ -41,7 +41,7 @@ Material:
     - _NoiseSpeed: 0.05
     - _OctaveCount: 4
     - _StepSize: 0.227
-    - _Steps: 4.71
+    - _Steps: 3.22
     - _SunScatterStrength: 1.27
     - _VolDepth: 0.119
     m_Colors:

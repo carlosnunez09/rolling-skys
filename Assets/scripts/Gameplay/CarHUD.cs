@@ -335,10 +335,12 @@ public class CarHUD : MonoBehaviour {
     // ── Helpers ───────────────────────────────────────────────────────
 
     RaceRuntime.RacerState PlayerRacerState () {
-        if (raceRuntime == null) return null;
-        foreach (var r in raceRuntime.Racers)
-            if (r.Car == car) return r;
-        return raceRuntime.Racers.Count > 0 ? raceRuntime.Racers[0] : null;
+        if (raceRuntime == null || car == null) return null;
+        var racers = raceRuntime.Racers;
+        if (racers == null) return null;
+        foreach (var r in racers)
+            if (r != null && r.Car == car) return r;
+        return racers.Count > 0 ? racers[0] : null;
     }
 
     static void Set (TextMeshProUGUI field, string value) {

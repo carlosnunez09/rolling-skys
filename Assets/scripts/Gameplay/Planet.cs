@@ -13,11 +13,15 @@ public class Planet : MonoBehaviour {
     [BoxGroup("Identity"), SerializeField]
     string _planetName = "Planet";
 
+    [BoxGroup("Minimap"), SerializeField, Min(1f), Tooltip("How far above the car's equatorial plane waypoint dots stay fully visible before fading out. Set to ~20-30% of this planet's radius.")]
+    float _dotFadeDistance = 50f;
+
     [BoxGroup("Tracks"), SerializeField]
     List<WaypointPath> _tracks = new List<WaypointPath>();
 
-    public string                   PlanetName    => _planetName;
-    public IReadOnlyList<WaypointPath> Tracks     => _tracks;
+    public string                      PlanetName      => _planetName;
+    public float                       DotFadeDistance => _dotFadeDistance;
+    public IReadOnlyList<WaypointPath> Tracks          => _tracks;
     public GravitySource            GravitySource { get; private set; }
 
     void Awake () {
