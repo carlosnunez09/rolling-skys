@@ -2,15 +2,20 @@ Shader "Custom/VolumetricCloud"
 {
     Properties
     {
-        [HDR] _CloudColor    ("Cloud Color",    Color)         = (1, 1, 1, 1)
-        [HDR] _ShadowColor   ("Shadow Color",   Color)         = (0.58, 0.70, 0.92, 1)
-        _Steps               ("Shade Steps",    Range(1, 5))   = 3
-        _NoiseScale          ("Noise Scale",    Float)         = 2.5
-        _BumpAmount          ("Bump Amount",    Range(0, 0.5)) = 0.28
-        _EdgeNoise           ("Edge Noise",     Range(0, 1))   = 0.65
-        _EdgeSharpness       ("Edge Sharpness", Range(0, 1))   = 0.3
-        _Density             ("Density",        Range(0, 1))   = 0.95
-        _VolDepth            ("Volume Depth",   Range(0.01, 0.5)) = 0.18
+        [HDR] _CloudColor        ("Cloud Color",          Color)            = (1, 1, 1, 1)
+        [HDR] _ShadowColor       ("Shadow Color",         Color)            = (0.58, 0.70, 0.92, 1)
+        [HDR] _SunScatterColor   ("Sun Edge Scatter",     Color)            = (1.00, 0.85, 0.50, 1)
+        [HDR] _AtmosphereColor   ("Atmosphere Tint",      Color)            = (0.30, 0.55, 1.00, 1)
+        _SunScatterStrength      ("Sun Scatter Strength", Range(0, 2))      = 0.8
+        _AtmosphereTintStrength  ("Atmosphere Tint",      Range(0, 1))      = 0.35
+        _Steps                   ("Shade Steps",          Range(1, 5))      = 3
+        _NoiseScale              ("Noise Scale",          Float)            = 2.5
+        _BumpAmount              ("Bump Amount",          Range(0, 0.5))    = 0.28
+        _EdgeNoise               ("Edge Noise",           Range(0, 1))      = 0.65
+        _EdgeSharpness           ("Edge Sharpness",       Range(0, 1))      = 0.3
+        _Density                 ("Density",              Range(0, 1))      = 0.95
+        _BaseDensity             ("Base Density",         Range(0, 0.8))    = 0.15
+        _VolDepth                ("Volume Depth",         Range(0.01, 0.5)) = 0.18
     }
 
     SubShader
@@ -42,12 +47,17 @@ Shader "Custom/VolumetricCloud"
             CBUFFER_START(UnityPerMaterial)
                 half4 _CloudColor;
                 half4 _ShadowColor;
+                half4 _SunScatterColor;
+                half4 _AtmosphereColor;
+                float _SunScatterStrength;
+                float _AtmosphereTintStrength;
                 float _Steps;
                 float _NoiseScale;
                 float _BumpAmount;
                 float _EdgeNoise;
                 float _EdgeSharpness;
                 float _Density;
+                float _BaseDensity;
                 float _VolDepth;
             CBUFFER_END
 
@@ -142,10 +152,12 @@ Shader "Custom/VolumetricCloud"
                 float alpha;
                 if (isFrontFace)
                 {
-                    // Exterior: noisy fluffy alpha edge breaks sphere silhouette
+                    // Exterior: noisy fluffy alpha breaks sphere silhouette.
+                    // _BaseDensity gives a floor so clouds are visible even at centre.
                     float edgeNoise = fbm(IN.positionOS * _NoiseScale * 1.7 + 0.35);
                     float noiseEdge = rim - edgeNoise * _EdgeNoise;
-                    alpha = (1.0 - smoothstep(_EdgeSharpness, _EdgeSharpness + 0.28, noiseEdge)) * _Density;
+                    float rimAlpha  = (1.0 - smoothstep(_EdgeSharpness, _EdgeSharpness + 0.28, noiseEdge));
+                    alpha = saturate(_BaseDensity + rimAlpha * (1.0 - _BaseDensity)) * _Density;
                 }
                 else
                 {
@@ -157,7 +169,6 @@ Shader "Custom/VolumetricCloud"
                 clip(alpha - 0.02);
 
                 // Fake volume: march 4 steps inward along sphere normal in OS.
-                // normalize(positionOS) == outward sphere normal, negate for inward march.
                 float3 marchDirOS = -normalize(IN.positionOS);
                 float depthDensity = 0.0;
                 [unroll] for (int s = 1; s <= 4; s++)
@@ -171,7 +182,20 @@ Shader "Custom/VolumetricCloud"
                 float  NdotL    = dot(normalWS, light.direction) * 0.5 + 0.5;
                 float  combined = saturate(NdotL * 0.65 + depthDensity * 0.35);
                 float  stepped  = floor(combined * max(1.0, _Steps)) / max(1.0, _Steps);
-                half3  color    = lerp(_ShadowColor.rgb, _CloudColor.rgb, stepped);
+
+                // Shadow colour gets atmosphere scatter tint so shadowed cloud undersides
+                // read as sky-lit rather than a flat grey.
+                half3 shadowTinted = lerp(_ShadowColor.rgb, _AtmosphereColor.rgb, _AtmosphereTintStrength);
+                half3 color = lerp(shadowTinted, _CloudColor.rgb, stepped);
+
+                // Sun edge scatter: brighten cloud surface facing toward the sun (Mie-style).
+                // Only on front faces so interior stays moody.
+                if (isFrontFace)
+                {
+                    float sunDot    = saturate(dot(normalWS, light.direction));
+                    float scatter   = pow(sunDot, 6.0) * _SunScatterStrength * (1.0 - stepped * 0.5);
+                    color          += _SunScatterColor.rgb * scatter;
+                }
 
                 return half4(color, alpha);
             }

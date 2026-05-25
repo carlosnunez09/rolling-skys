@@ -22,7 +22,7 @@ public class MovingCar : MonoBehaviour {
 	float brakeForce = 120f;
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 50f)]
-	float coastDeceleration = 8f;
+	float coastDeceleration = 14f;
 
 	// X = speed / maxSpeed (0–1), Y = torque multiplier (0–1).
 	// High torque at low speed, tapers off toward max speed.
@@ -41,13 +41,13 @@ public class MovingCar : MonoBehaviour {
 	// ── Steering ──────────────────────────────────────────────────────
 
 	[BoxGroup("Steering"), SerializeField, Range(1f, 30f)]
-	float minTurningRadius = 6f;
+	float minTurningRadius = 5.2f;
 
 	// ── Grip & Drift ──────────────────────────────────────────────────
 
 	// Fraction of lateral velocity cancelled per frame (0 = ice, 1 = locked)
 	[BoxGroup("Grip & Drift"), SerializeField, Range(0f, 1f)]
-	float lateralGrip = 0.85f;
+	float lateralGrip = 0.93f;
 
 	// Same scale but much lower — real sliding during drift
 	[BoxGroup("Grip & Drift"), SerializeField, Range(0f, 0.2f)]
@@ -95,7 +95,7 @@ public class MovingCar : MonoBehaviour {
 	float maxSlipYawRate = 180f;
 
 	[BoxGroup("Landing Slip"), SerializeField, Range(0f, 10f)]
-	float slipRecoveryRate = 2f;
+	float slipRecoveryRate = 3.5f;
 
 	// ── Jump ──────────────────────────────────────────────────────────
 
@@ -298,6 +298,36 @@ public class MovingCar : MonoBehaviour {
 	// When false the car physics still runs but all input is zeroed out.
 	bool _inputEnabled = true;
 
+	// Scripted boost-pad trajectory — input off and driving forces skipped.
+	bool _trajectoryLocked;
+	bool _inputEnabledBeforeTrajectory;
+
+	/// <summary>True while a BoostPad is driving this car along a fixed arc.</summary>
+	public bool IsTrajectoryLocked => _trajectoryLocked;
+
+	/// <summary>
+	/// Lock or unlock scripted-trajectory mode (used by BoostPad).
+	/// Restores the prior input-enabled state when unlocking.
+	/// </summary>
+	public void SetTrajectoryLocked (bool locked) {
+		if (_trajectoryLocked == locked) return;
+		_trajectoryLocked = locked;
+		if (locked) {
+			_inputEnabledBeforeTrajectory = _inputEnabled;
+			SetInputEnabled(false);
+		} else {
+			SyncYawFromTransform();
+			SetInputEnabled(_inputEnabledBeforeTrajectory);
+		}
+	}
+
+	void SyncYawFromTransform () {
+		Quaternion rel = Quaternion.Inverse(gravityCar.GravityAlignment) * transform.rotation;
+		yaw = rel.eulerAngles.y;
+		if (yaw > 180f) yaw -= 360f;
+		yawVelocity = 0f;
+	}
+
 	/// <summary>
 	/// Enable or disable player input without disabling the component.
 	/// Physics, gravity, and stats continue to update regardless.
@@ -347,8 +377,27 @@ public class MovingCar : MonoBehaviour {
 	}
 
 	void FixedUpdate () {
-		Vector3 gravity = gravityCar.UpdateAndApplyGravity();
-		Vector3 upAxis  = gravityCar.UpAxis;
+		Vector3 gravity;
+		Vector3 upAxis;
+
+		if (_trajectoryLocked) {
+			// BoostPad drives position/velocity; only refresh stats and gravity alignment.
+			gravity = gravityCar.RefreshGravityState();
+			upAxis  = gravityCar.UpAxis;
+			velocity = body.linearVelocity;
+			UpdateState(upAxis);
+			var rot = body.rotation;
+			Vector3 trajForward = rot * Vector3.forward;
+			Vector3 trajRight   = rot * Vector3.right;
+			float fwd = Vector3.Dot(velocity, trajForward);
+			float lat = Vector3.Dot(velocity, trajRight);
+			UpdateStats(gravity, false, fwd, lat, velocity.magnitude);
+			ClearState();
+			return;
+		}
+
+		gravity = gravityCar.UpdateAndApplyGravity();
+		upAxis  = gravityCar.UpAxis;
 
 		stepsSinceLastGrounded += 1;
 		stepsSinceLastJump     += 1;

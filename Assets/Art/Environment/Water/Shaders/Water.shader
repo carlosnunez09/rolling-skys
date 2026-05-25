@@ -27,6 +27,13 @@ Shader "Custom/Water"
 
         [Header(Wake)]
         _WakeFadeSpeed   ("Wake Fade Speed", Range(1, 20))    = 6.0
+
+        [Header(Sky Reflection)]
+        [HDR] _SkyColor           ("Sky Color",           Color)        = (0.40, 0.65, 1.00, 1)
+        [HDR] _CloudReflectColor  ("Cloud Reflect Color", Color)        = (1.00, 1.00, 1.00, 1)
+        _CloudReflectScale        ("Cloud Scale",         Float)        = 0.12
+        _CloudReflectCoverage     ("Cloud Coverage",      Range(0, 1))  = 0.48
+        _CloudReflectStrength     ("Reflect Strength",    Range(0, 1))  = 0.35
     }
 
     SubShader
@@ -72,6 +79,11 @@ Shader "Custom/Water"
                 float  _FoamCutoff;
                 float  _FoamSoftness;
                 float  _WakeFadeSpeed;
+                half4  _SkyColor;
+                half4  _CloudReflectColor;
+                float  _CloudReflectScale;
+                float  _CloudReflectCoverage;
+                float  _CloudReflectStrength;
             CBUFFER_END
 
             // Global trample data — written by GrassTrampler.cs via Shader.SetGlobal*
@@ -175,6 +187,14 @@ Shader "Custom/Water"
                 return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
             }
 
+            // 3-octave FBM for cloud reflection — sampled in reflected XZ world space.
+            float CloudFbm(float2 p)
+            {
+                float v = 0.0, a = 0.5;
+                [unroll] for (int i = 0; i < 3; i++) { v += a * ValueNoise(p); p *= 2.1; a *= 0.5; }
+                return v;
+            }
+
             Varyings vert(Attributes input)
             {
                 Varyings output  = (Varyings)0;
@@ -245,6 +265,23 @@ Shader "Custom/Water"
                                * (1.0 - smoothstep(0.55, 1.0, trample))
                                * 1.4;
                 litColor += _FoamColor.rgb * wakeEdge;
+
+                // ── Sky / cloud reflection ──────────────────────────────────
+                // Compute the reflected view ray and sample cloud FBM in its XZ plane.
+                // This gives each water fragment a plausible cloud overhead colour
+                // without needing a live reflection camera.
+                float3 reflDir  = reflect(-V, N);
+                // Flatten to horizontal so clouds feel above the water, not behind it.
+                float2 cloudUV  = (reflDir.xz / max(abs(reflDir.y) + 0.01, 0.1))
+                                  * _CloudReflectScale
+                                  + _Time.y * 0.008;
+                float  cloudN   = CloudFbm(cloudUV);
+                float  cloudMask = smoothstep(_CloudReflectCoverage - 0.1, _CloudReflectCoverage + 0.1, cloudN);
+
+                // Sky base tint follows the fresnel so grazing angles get more sky colour.
+                half3 skyReflect   = lerp(_SkyColor.rgb, _CloudReflectColor.rgb, cloudMask);
+                float reflFresnel  = pow(1.0 - NdotV, 2.5);
+                litColor = lerp(litColor, skyReflect, reflFresnel * _CloudReflectStrength);
 
                 half3  finalColor = lerp(litColor, _FoamColor.rgb, foam);
                 half   finalAlpha = max(_WaterColor.a, foam * _FoamColor.a * shoreMask);

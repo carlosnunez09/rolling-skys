@@ -28,6 +28,17 @@ public class GravityCar : MonoBehaviour {
 		return gravity;
 	}
 
+	/// <summary>
+	/// Updates up-axis alignment without applying a gravity force.
+	/// Used while a BoostPad drives the car along a scripted arc.
+	/// </summary>
+	public Vector3 RefreshGravityState () {
+		Vector3 gravity = CustomGravity.GetGravity(body.position, out Vector3 upAxis);
+		UpAxis = upAxis;
+		UpdateAlignment(upAxis);
+		return gravity;
+	}
+
 	void UpdateAlignment (Vector3 upAxis) {
 		// Zero-length upAxis (no gravity source active) would produce NaN inside
 		// FromToRotation and corrupt the alignment quaternion permanently.

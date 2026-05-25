@@ -299,30 +299,37 @@ public class CarHUD : MonoBehaviour {
     void UpdateDebugBlock () {
         if (debugBlock == null) return;
 
-        float kmh    = car.Speed * 3.6f;
-        float torque = car.TorqueRatio * 100f;
-        float rpm    = car.RPM;
+        float kmh      = car.Speed * 3.6f;
+        float fwdKmh   = car.ForwardSpeed * 3.6f;
+        float torque   = car.TorqueRatio * 100f;
+        float rpm      = car.RPM;
+        float heading  = car.transform.eulerAngles.y;
+        string state   = car.IsGrounded ? (car.IsDrifting ? "DRIFT" : "GROUND") : "AIR";
         string raceLine = "—";
 
         var player = PlayerRacerState();
         if (player != null)
-            raceLine = $"T {FormatTime(player.RaceTime)}  Lap {player.LapCount}  Pos {Ordinal(player.Position)}";
+            raceLine = $"T {FormatTime(player.RaceTime)}  Lap {player.LapCount}  {Ordinal(player.Position)}";
 
         debugBlock.text =
-            $"Speed        {kmh:F1} km/h\n"          +
-            $"Fwd Speed    {car.ForwardSpeed * 3.6f:F1} km/h\n" +
-            $"Lat Speed    {car.LateralSpeed:F2} m/s\n"         +
-            $"Accel        {car.Acceleration:+0.0;-0.0} m/s²\n" +
-            $"Turn Rate    {car.YawRate:+0.0;-0.0} °/s\n"        +
-            $"Torque       {torque:F0} %\n"            +
-            $"RPM          {rpm:F0}\n"                 +
-            $"Grounded     {(car.IsGrounded ? "Yes" : "No")}\n" +
-            $"Drifting     {(car.IsDrifting ? "Yes" : "No")}\n" +
-            $"Land Slip    {car.LandingSlip * 100f:F0}%\n"       +
-            $"Ground Ang   {car.GroundAngle:F1}°\n"   +
-            $"Gravity      {car.GravityStrength:F2} m/s²\n"      +
-            $"Grav Source  {car.GravitySource}\n"      +
-            $"Race         {raceLine}";
+            $"<b>SPEED & ENGINE</b>\n" +
+            $"  Speed         {kmh:F1} km/h  ({car.SpeedRatio * 100f:F0}%)\n" +
+            $"  Fwd           {fwdKmh:+0.0;-0.0} km/h\n" +
+            $"  Lateral       {car.LateralSpeed:F2} m/s\n" +
+            $"  Accel         {car.Acceleration:+0.0;-0.0} m/s²\n" +
+            $"  Torque        {torque:F0}%  |  RPM {rpm:F0}\n" +
+            $"\n<b>HANDLING</b>\n" +
+            $"  State         {state}\n" +
+            $"  Turn Rate     {car.YawRate:+0.0;-0.0}°/s\n" +
+            $"  Heading       {heading:F0}°\n" +
+            $"  Land Slip     {car.LandingSlip * 100f:F0}%\n" +
+            $"  Grip          {car.GroundFriction * 100f:F0}%\n" +
+            $"\n<b>WORLD</b>\n" +
+            $"  Ground Ang    {car.GroundAngle:F1}°\n" +
+            $"  Gravity       {car.GravityStrength:F2} m/s²\n" +
+            $"  Source        {car.GravitySource}\n" +
+            $"\n<b>RACE</b>\n" +
+            $"  {raceLine}";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

@@ -25,25 +25,30 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
+    - _AtmosphereTintStrength: 0.529
+    - _BaseDensity: 0
     - _BumpAmount: 0.5
     - _DarknessThreshold: 0.15
-    - _Density: 0.744
+    - _Density: 0.765
     - _DensityThreshold: 0.463
     - _EdgeFade: 0.274
     - _EdgeNoise: 0.65
-    - _EdgeSharpness: 0.3
+    - _EdgeSharpness: 0.117
     - _Gain: 0.5
     - _Lacunarity: 2
     - _LightAbsorption: 1.46
-    - _NoiseScale: 2.5
+    - _NoiseScale: 2.68
     - _NoiseSpeed: 0.05
     - _OctaveCount: 4
     - _StepSize: 0.227
     - _Steps: 4.71
-    - _VolDepth: 0.18
+    - _SunScatterStrength: 1.27
+    - _VolDepth: 0.119
     m_Colors:
+    - _AtmosphereColor: {r: 0.3, g: 0.55, b: 1, a: 1}
     - _CloudColor: {r: 1.2, g: 1.2, b: 1.2, a: 1}
     - _ShadowColor: {r: 0.58, g: 0.7, b: 0.92, a: 1}
     - _SkyColor: {r: 0.6367924, g: 0.7908805, b: 1, a: 1}
+    - _SunScatterColor: {r: 1, g: 0.85, b: 0.5, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
