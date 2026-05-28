@@ -260,10 +260,17 @@ public class OrbitSpawner : MonoBehaviour
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        if (!Application.isPlaying) return;
         if (orbitCenter == null) orbitCenter = transform;
         orbitPlaneRotation = Quaternion.Euler(orbitPlaneEuler);
-        Spawn();
+
+        if (!Application.isPlaying) return;
+
+        // Instantiate cannot be called during OnValidate — defer to the next editor frame.
+        UnityEditor.EditorApplication.delayCall += () =>
+        {
+            if (this == null) return;
+            Spawn();
+        };
     }
 #endif
 }

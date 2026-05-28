@@ -2,13 +2,14 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
+using Unity.Netcode;
 
 /// <summary>
 /// Central race controller. A single WaypointPath can span multiple planets —
 /// checkpoints are waypoint gates anywhere in the world.
 /// Trigger-based race starts supply the path and config directly.
 /// </summary>
-public class RaceRuntime : MonoBehaviour {
+public class RaceRuntime : NetworkBehaviour {
 
     // ── Player ─────────────────────────────────────────────────────────────────
 
@@ -145,6 +146,26 @@ public class RaceRuntime : MonoBehaviour {
     public void StartRaceManual (WaypointPath path, string trackName, int totalLaps = 3, float countdownSeconds = 3f)
         => LoadTrackAndStart(path, trackName, totalLaps, countdownSeconds);
 
+    public void RebuildRacerList () {
+        BuildRacerList();
+    }
+
+    /// <summary>
+    /// Called by the local owner's MovingCar after it spawns on the network so the
+    /// HUD and input-gating always target the correct car without requiring a manual
+    /// Inspector reference in multiplayer sessions.
+    /// </summary>
+    public void SetPlayerCar (MovingCar car) {
+        if (car == null) return;
+
+        _playerCar = car;
+        if (_camera == null)
+            _camera = FindFirstObjectByType<OrbitCamera>();
+        if (_camera != null)
+            _camera.SetFocus(car.transform);
+        BuildRacerList();
+    }
+
     // ── Phase Transitions ──────────────────────────────────────────────────────
 
     void BeginCountdown () {
@@ -217,16 +238,7 @@ public class RaceRuntime : MonoBehaviour {
         // ── Checkpoint crossed ─────────────────────────────────────────────────
         racer.LastPassedIndex = nextIdx;
 
-        bool completedLap = _activePath.IsLoop
-            ? nextIdx == 0 && racer.LastPassedIndex != -1   // wrapped back to start
-            : nextIdx == _activePath.Count - 1;              // reached final gate
-
-        // For looping paths the wrap is detected by nextIdx being the one we just set
-        // to 0 after going past Count-1.  Re-derive correctly:
-        bool wrappedAround = (_activePath.IsLoop && nextIdx == 0 && racer.LastPassedIndex == 0
-                              && racer.LapCount > 0);
-
-        // Simpler, reliable lap completion: whenever we cross the last waypoint
+        // Lap completion: whenever we cross the last waypoint
         if (nextIdx == _activePath.Count - 1) {
             racer.LapCount++;
             racer.LastPassedIndex = -1;   // reset to "before first checkpoint"
@@ -239,7 +251,11 @@ public class RaceRuntime : MonoBehaviour {
     void FinishRacer (RacerState racer) {
         racer.Finished   = true;
         racer.FinishTime = racer.RaceTime;
-        SetCarInput(false);
+
+        // Only gate input for the local player car; never block the host when
+        // a remote racer finishes.
+        if (racer.Car == _playerCar)
+            SetCarInput(false);
 
         if (Winner == null) {
             Winner = racer;
@@ -345,14 +361,58 @@ public class RaceRuntime : MonoBehaviour {
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     void BuildRacerList () {
+#if UNITY_SERVER && !UNITY_EDITOR
+        // Server builds the list once all players have spawned.
+        // Called again from OnPlayerConnected when late joiners arrive.
+        var allCars = FindObjectsByType<MovingCar>(FindObjectsSortMode.None);
+        _racers = new RacerState[allCars.Length];
+        for (int i = 0; i < allCars.Length; i++) {
+            var net = allCars[i].GetComponent<NetworkObject>();
+            _racers[i] = new RacerState {
+                Name = $"Player {net.OwnerClientId}",
+                Car  = allCars[i]
+            };
+        }
+#else
+        // Client keeps the original single-player list for local HUD.
+        // The server is authoritative on positions/laps — client just displays.
         if (_playerCar == null) {
-            Debug.LogError("[RaceRuntime] _playerCar is not assigned — racer list will be empty.", this);
             _racers = System.Array.Empty<RacerState>();
             return;
         }
-        _racers = new[] {
-            new RacerState { Name = "Player", Car = _playerCar }
-        };
+        _racers = new[] { new RacerState { Name = "Player", Car = _playerCar } };
+#endif
+    }
+
+    /// <summary>
+    /// Called by the owning client when it detects a checkpoint crossing.
+    /// Server validates the report against expected waypoint order before
+    /// updating authoritative lap state.
+    /// </summary>
+    [ServerRpc(RequireOwnership = false)]
+    public void ReportCheckpointServerRpc (int waypointIndex, ServerRpcParams rpcParams = default) {
+        ulong clientId = rpcParams.Receive.SenderClientId;
+
+        foreach (var racer in _racers) {
+            var net = racer.Car.GetComponent<NetworkObject>();
+            if (net.OwnerClientId != clientId) continue;
+
+            int expectedNext = racer.LastPassedIndex < 0
+                ? 0
+                : _activePath.GetNextIndex(racer.LastPassedIndex);
+
+            if (waypointIndex != expectedNext) return; // reject out-of-order reports
+
+            racer.LastPassedIndex = waypointIndex;
+
+            if (waypointIndex == _activePath.Count - 1) {
+                racer.LapCount++;
+                racer.LastPassedIndex = -1;
+                if (racer.LapCount >= _totalLaps)
+                    FinishRacer(racer);
+            }
+            break;
+        }
     }
 
     void ResetRacers () {

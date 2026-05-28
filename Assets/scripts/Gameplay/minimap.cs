@@ -4,6 +4,7 @@ using UnityEngine.Rendering.Universal;
 using UnityEngine.UI;
 using TMPro;
 using NaughtyAttributes;
+using Unity.Netcode;
 
 /// <summary>
 /// HUD component: renders a live globe view of the dominant planet into a
@@ -27,7 +28,7 @@ public class minimap : MonoBehaviour {
     //
     // ── References ────────────────────────────────────────────────────────────
 
-    [BoxGroup("References"), SerializeField, Required]
+    [BoxGroup("References"), SerializeField]
     MovingCar _car;
 
     [BoxGroup("References"), SerializeField]
@@ -115,6 +116,9 @@ public class minimap : MonoBehaviour {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     void Awake () {
+        if (_race == null)
+            _race = FindAnyObjectByType<RaceRuntime>();
+
         SetupCircleMask();
         BuildCamera();
     }
@@ -140,7 +144,10 @@ public class minimap : MonoBehaviour {
     }
 
     void LateUpdate () {
-        if (_car == null) return;
+        if (!IsBindableCar(_car))
+            TryBindLocalPlayerCar();
+
+        if (!IsBindableCar(_car)) return;
 
         Planet dominant = PlanetRegistry.GetDominant(_car.transform.position);
 
@@ -175,6 +182,38 @@ public class minimap : MonoBehaviour {
         UpdateOrthoZoom();
         UpdatePlayerDot();
         UpdateWaypointDots();
+    }
+
+    public void BindToCar (MovingCar targetCar, RaceRuntime runtime = null) {
+        if (targetCar == null) return;
+
+        _car = targetCar;
+        if (runtime != null)
+            _race = runtime;
+        else if (_race == null)
+            _race = FindAnyObjectByType<RaceRuntime>();
+
+        _currentPlanet = null;
+        _camInitialized = false;
+        ClearDots();
+    }
+
+    void TryBindLocalPlayerCar () {
+        MovingCar[] cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
+        foreach (MovingCar candidate in cars) {
+            if (!IsBindableCar(candidate)) continue;
+
+            BindToCar(candidate);
+            return;
+        }
+    }
+
+    static bool IsBindableCar (MovingCar candidate) {
+        if (candidate == null || !candidate.isActiveAndEnabled) return false;
+        if (candidate.IsSpawned) return candidate.IsOwner;
+
+        NetworkManager networkManager = NetworkManager.Singleton;
+        return networkManager == null || !networkManager.IsListening;
     }
 
     // ── Camera Setup ──────────────────────────────────────────────────────────

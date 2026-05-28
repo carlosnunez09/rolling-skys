@@ -2,10 +2,11 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using NaughtyAttributes;
+using Unity.Netcode;
 
 [RequireComponent(typeof(Rigidbody))]
 [RequireComponent(typeof(GravityCar))]
-public class MovingCar : MonoBehaviour {
+public class MovingCar : NetworkBehaviour {
 
 	// ── Engine ────────────────────────────────────────────────────────
 
@@ -237,11 +238,17 @@ public class MovingCar : MonoBehaviour {
 	readonly Vector3?[] skidLastPos          = { null, null };
 	Mesh  skidMesh;
 	bool  skidDirty;
+	readonly NetworkVariable<bool> _networkDrifting = new NetworkVariable<bool>(
+		false,
+		NetworkVariableReadPermission.Everyone,
+		NetworkVariableWritePermission.Owner);
 
 	// Runtime-created objects that need explicit cleanup in OnDestroy.
 	GameObject _skidGo;
 	Material   _skidFallbackMat;
-
+	bool    _remoteSkidInitialized;
+	Vector3 _remoteLastSkidPosition;
+	Vector3 _remoteSmoothedVelocity;
 	// Cached mesh arrays — reused each rebuild to avoid per-frame GC.
 	Vector3[] _skidVerts;
 	Color[]   _skidColors;
@@ -268,7 +275,8 @@ public class MovingCar : MonoBehaviour {
 		// (currentSpeed - 0) / fixedDeltaTime on the very first FixedUpdate.
 		prevSpeed = 0f;
 
-		// World-space child that holds the skid mark mesh (stays put as the car moves)
+#if !UNITY_SERVER || UNITY_EDITOR
+		// Skid mark mesh — client visual only, never needed on server
 		_skidGo = new GameObject("SkidMarks");
 		_skidGo.transform.SetParent(null);
 		skidMesh = new Mesh { name = "SkidMarks" };
@@ -285,6 +293,7 @@ public class MovingCar : MonoBehaviour {
 		mr.receiveShadows    = false;
 		mr.lightProbeUsage   = UnityEngine.Rendering.LightProbeUsage.Off;
 
+		// Input actions — server has no player, no input
 		moveAction = new InputAction("CarMove", InputActionType.Value);
 		moveAction.AddCompositeBinding("2DVector")
 			.With("Up",    "<Keyboard>/w")
@@ -300,6 +309,28 @@ public class MovingCar : MonoBehaviour {
 		driftAction = new InputAction("CarDrift", InputActionType.Button);
 		driftAction.AddBinding("<Keyboard>/leftShift");
 		driftAction.AddBinding("<Gamepad>/leftShoulder");
+#endif
+	}
+
+	public override void OnNetworkSpawn () {
+		ResetRemoteSkidTracking();
+
+		if (IsOwner) {
+#if !UNITY_SERVER || UNITY_EDITOR
+			body.isKinematic = false;
+			SetInputEnabled(true);
+			// Register this car as the local player so RaceRuntime HUD and
+			// input-gating target the correct car without a manual Inspector link.
+			RaceRuntime raceRuntime = FindAnyObjectByType<RaceRuntime>();
+			raceRuntime?.SetPlayerCar(this);
+#endif
+			return;
+		}
+
+		// Non-owner: this car is a ghost driven by NetworkTransform.
+		// Kill local physics so it doesn't fight the received transforms.
+		SetInputEnabled(false);
+		body.isKinematic = true;
 	}
 
 	// When false the car physics still runs but all input is zeroed out.
@@ -342,13 +373,13 @@ public class MovingCar : MonoBehaviour {
 	public void SetInputEnabled (bool on) {
 		_inputEnabled = on;
 		if (on) {
-			moveAction.Enable();
-			jumpAction.Enable();
-			driftAction.Enable();
+			moveAction?.Enable();
+			jumpAction?.Enable();
+			driftAction?.Enable();
 		} else {
-			moveAction.Disable();
-			jumpAction.Disable();
-			driftAction.Disable();
+			moveAction?.Disable();
+			jumpAction?.Disable();
+			driftAction?.Disable();
 			// Clear any queued jump so a press before lockout doesn't fire
 			// the moment input is re-enabled (e.g. race countdown locking input).
 			desiredJump = false;
@@ -357,16 +388,16 @@ public class MovingCar : MonoBehaviour {
 
 	void OnEnable () {
 		if (_inputEnabled) {
-			moveAction.Enable();
-			jumpAction.Enable();
-			driftAction.Enable();
+			moveAction?.Enable();
+			jumpAction?.Enable();
+			driftAction?.Enable();
 		}
 	}
 
 	void OnDisable () {
-		moveAction.Disable();
-		jumpAction.Disable();
-		driftAction.Disable();
+		moveAction?.Disable();
+		jumpAction?.Disable();
+		driftAction?.Disable();
 	}
 
 	void OnDestroy () {
@@ -379,11 +410,19 @@ public class MovingCar : MonoBehaviour {
 	}
 
 	void Update () {
-		desiredJump |= jumpAction.WasPressedThisFrame();
+#if !UNITY_SERVER || UNITY_EDITOR
+		if (IsOwner)
+			desiredJump |= jumpAction.WasPressedThisFrame();
+		else
+			UpdateRemoteSkidMarks(Time.deltaTime);
+
 		UpdateSkidAlpha();
+#endif
 	}
 
 	void FixedUpdate () {
+		if (!IsOwner) return; // non-owners are kinematic, NetworkTransform drives them
+
 		Vector3 gravity;
 		Vector3 upAxis;
 
@@ -424,6 +463,8 @@ public class MovingCar : MonoBehaviour {
 		float   throttle = input.y;
 		float   steer    = input.x;
 		bool    isDrifting = driftAction.IsPressed();
+		if (IsSpawned && _networkDrifting.Value != isDrifting)
+			_networkDrifting.Value = isDrifting;
 
 		Quaternion rotation = ComputeRotation();
 		Vector3 forward = rotation * Vector3.forward;
@@ -646,8 +687,15 @@ public class MovingCar : MonoBehaviour {
 		return true;
 	}
 
-	void OnCollisionEnter (Collision collision) => EvaluateCollision(collision);
-	void OnCollisionStay  (Collision collision) => EvaluateCollision(collision);
+	void OnCollisionEnter (Collision collision) {
+		if (IsSpawned && !IsOwner) return;
+		EvaluateCollision(collision);
+	}
+
+	void OnCollisionStay  (Collision collision) {
+		if (IsSpawned && !IsOwner) return;
+		EvaluateCollision(collision);
+	}
 
 	void EvaluateCollision (Collision collision) {
 		// Read surface friction once per colliding object (not per contact point).
@@ -667,9 +715,65 @@ public class MovingCar : MonoBehaviour {
 
 	// ── Skid Marks ────────────────────────────────────────────────────
 
-	void UpdateSkidMarks (Vector3 upAxis, bool isDrifting, float lateralSpeed) {
+	void ResetRemoteSkidTracking () {
+		_remoteSkidInitialized = false;
+		_remoteLastSkidPosition = transform.position;
+		_remoteSmoothedVelocity = Vector3.zero;
+		for (int i = 0; i < skidTrailActive.Length; i++) {
+			skidTrailActive[i] = false;
+			skidLastPos[i] = null;
+		}
+	}
+
+	void UpdateRemoteSkidMarks (float deltaTime) {
+		if (!IsSpawned || IsOwner || skidMesh == null) return;
+
+		Vector3 currentPosition = transform.position;
+		if (!_remoteSkidInitialized) {
+			_remoteSkidInitialized = true;
+			_remoteLastSkidPosition = currentPosition;
+			return;
+		}
+
+		Vector3 displacement = currentPosition - _remoteLastSkidPosition;
+		_remoteLastSkidPosition = currentPosition;
+
+		if (displacement.sqrMagnitude > 100f) {
+			_remoteSmoothedVelocity = Vector3.zero;
+			return;
+		}
+
+		float dt = Mathf.Max(deltaTime, 0.0001f);
+		Vector3 observedVelocity = displacement / dt;
+		float velocityBlend = 1f - Mathf.Exp(-18f * dt);
+		_remoteSmoothedVelocity = Vector3.Lerp(_remoteSmoothedVelocity, observedVelocity, velocityBlend);
+
+		Vector3 upAxis = CustomGravity.GetUpAxis(currentPosition);
+		Vector3 forward = transform.forward;
+		Vector3 right = transform.right;
+		float forwardSpeed = Vector3.Dot(_remoteSmoothedVelocity, forward);
+		float lateralSpeed = Vector3.Dot(_remoteSmoothedVelocity, right);
+		bool remoteGrounded = Physics.Raycast(
+			currentPosition + upAxis,
+			-upAxis,
+			out RaycastHit hit,
+			Mathf.Max(probeDistance + 1f, 2.5f),
+			probeMask)
+			&& Vector3.Dot(upAxis, hit.normal) >= minGroundDot;
+
+		statSpeed = _remoteSmoothedVelocity.magnitude;
+		statForwardSpeed = forwardSpeed;
+		statLateralSpeed = lateralSpeed;
+		statGrounded = remoteGrounded;
+		statDrifting = _networkDrifting.Value && remoteGrounded;
+
+		UpdateSkidMarks(upAxis, _networkDrifting.Value, lateralSpeed, remoteGrounded);
+	}
+
+	void UpdateSkidMarks (Vector3 upAxis, bool isDrifting, float lateralSpeed, bool groundOverride = false) {
 		float now        = Time.time;
-		bool  shouldMark = OnGround && isDrifting && Mathf.Abs(lateralSpeed) >= minSkidLateralSpeed;
+		bool  isGrounded = groundOverride || OnGround;
+		bool  shouldMark = isGrounded && isDrifting && Mathf.Abs(lateralSpeed) >= minSkidLateralSpeed;
 		Vector3 carRight = transform.right;
 
 		for (int w = 0; w < 2; w++) {

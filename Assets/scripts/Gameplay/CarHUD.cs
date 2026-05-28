@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using NaughtyAttributes;
+using Unity.Netcode;
 
 /// <summary>
 /// Full instrument-panel HUD for the player car.
@@ -12,7 +13,7 @@ public class CarHUD : MonoBehaviour {
 
     // ── References ────────────────────────────────────────────────────
 
-    [BoxGroup("Car"), SerializeField, Required]
+    [BoxGroup("Car"), SerializeField]
     MovingCar car;
 
     [BoxGroup("Race"), SerializeField]
@@ -152,13 +153,25 @@ public class CarHUD : MonoBehaviour {
 
     // ── Lifecycle ─────────────────────────────────────────────────────
 
+    void Awake () {
+        AutoWireUiReferences();
+    }
+
     void Start () {
+        AutoWireUiReferences();
+
+        if (raceRuntime == null)
+            raceRuntime = FindAnyObjectByType<RaceRuntime>();
+
         if (speedUnitText != null) speedUnitText.text = "km/h";
         BuildTorqueGraph();
     }
 
     void LateUpdate () {
-        if (car == null) return;
+        if (!IsBindableCar(car))
+            TryBindLocalPlayerCar();
+
+        if (!IsBindableCar(car)) return;
         UpdateSpeedGauge();
         UpdateTorqueGraph();
         UpdateHandling();
@@ -167,7 +180,80 @@ public class CarHUD : MonoBehaviour {
         UpdateDebugBlock();
     }
 
+    public void BindToCar (MovingCar targetCar, RaceRuntime runtime = null) {
+        if (targetCar == null) return;
+
+        AutoWireUiReferences();
+        car = targetCar;
+        if (runtime != null)
+            raceRuntime = runtime;
+        else if (raceRuntime == null)
+            raceRuntime = FindAnyObjectByType<RaceRuntime>();
+
+        _graphDirty = true;
+        BuildTorqueGraph();
+    }
+
+    void TryBindLocalPlayerCar () {
+        MovingCar[] cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
+        foreach (MovingCar candidate in cars) {
+            if (!IsBindableCar(candidate)) continue;
+
+            BindToCar(candidate);
+            return;
+        }
+    }
+
     // ── Speed Gauge ───────────────────────────────────────────────────
+
+    static bool IsBindableCar (MovingCar candidate) {
+        if (candidate == null || !candidate.isActiveAndEnabled) return false;
+        if (candidate.IsSpawned) return candidate.IsOwner;
+
+        NetworkManager networkManager = NetworkManager.Singleton;
+        return networkManager == null || !networkManager.IsListening;
+    }
+
+    void AutoWireUiReferences () {
+        if (speedText == null) speedText = FindChildText("SpeedNum");
+        if (speedUnitText == null) speedUnitText = FindChildText("SpeedUnit");
+        if (speedDialFill == null) speedDialFill = FindChildComponent<Image>("DialFill");
+        if (speedNeedle == null) speedNeedle = FindChildComponent<RectTransform>("Needle");
+        if (maxSpeedLabel == null) maxSpeedLabel = FindChildText("SpeedoFooter");
+        if (torqueGraphImage == null) torqueGraphImage = FindChildComponent<RawImage>("TorqueGraph");
+        if (torqueMarker == null) torqueMarker = FindChildComponent<RectTransform>("TorqueMarker");
+        if (torqueValueText == null) torqueValueText = FindChildText("TorqueValue");
+        if (rpmText == null) rpmText = FindChildText("TorqueLabel");
+        if (yawRateText == null) yawRateText = FindChildText("TurnRateText");
+        if (turnRateBar == null) turnRateBar = FindChildComponent<Slider>("TurnRateBar");
+        if (landingSlipText == null) landingSlipText = FindChildText("SlipText");
+        if (driftingText == null) driftingText = FindChildText("DriftText");
+        if (gravitySourceText == null) gravitySourceText = FindChildText("GravText");
+        if (groundedText == null) groundedText = FindChildText("GroundText");
+        if (trackNameText == null) trackNameText = FindChildText("TrackName");
+        if (lapText == null) lapText = FindChildText("Lap");
+        if (checkpointText == null) checkpointText = FindChildText("Checkpoint");
+        if (raceTimeText == null) raceTimeText = FindChildText("RaceTime");
+        if (positionText == null) positionText = FindChildText("Position");
+    }
+
+    TextMeshProUGUI FindChildText (params string[] names) => FindChildComponent<TextMeshProUGUI>(names);
+
+    T FindChildComponent<T> (params string[] names) where T : Component {
+        if (names == null || names.Length == 0) return null;
+
+        foreach (Transform child in GetComponentsInChildren<Transform>(true)) {
+            foreach (string targetName in names) {
+                if (!string.Equals(child.name, targetName, System.StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                T component = child.GetComponent<T>();
+                if (component != null) return component;
+            }
+        }
+
+        return null;
+    }
 
     void UpdateSpeedGauge () {
         float kmh = car.Speed * 3.6f;

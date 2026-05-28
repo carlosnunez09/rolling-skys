@@ -10,6 +10,9 @@ public class OrbitCamera : MonoBehaviour {
 	[BoxGroup("Focus"), SerializeField]
 	Transform focus = default;
 
+	[BoxGroup("Focus"), SerializeField]
+	bool autoFindLocalPlayer = true;
+
 	[BoxGroup("Focus"), SerializeField, Range(0f, 10f), Label("Lag Radius")]
 	float focusRadius = 5f;
 
@@ -101,34 +104,6 @@ public class OrbitCamera : MonoBehaviour {
 	void Awake () {
 		regularCamera = GetComponent<Camera>();
 
-		if (focus == null) {
-			Debug.LogError("[OrbitCamera] No Focus transform assigned.", this);
-			enabled = false;
-			return;
-		}
-
-		focusBody  = focus.GetComponent<Rigidbody>();
-		focusPoint = focus.position;
-
-		// Initialise gravity alignment from the actual up-axis at the focus point
-		// so the camera never has to frantically correct from world-up on startup.
-		Vector3 startUp = CustomGravity.GetUpAxis(focusPoint);
-		if (startUp.sqrMagnitude > 0.001f)
-			gravityAlignment = Quaternion.FromToRotation(Vector3.up, startUp);
-
-		// Initialise the smoothed forward so AutomaticRotation doesn't sweep the
-		// camera from world-forward to the car's real heading on the first frame.
-		smoothedFocusForward = focus.forward;
-
-		// Initialise the yaw to match the car's current facing so no auto-rotation
-		// fires at the start of play.
-		Vector3 localFwd  = Quaternion.Inverse(gravityAlignment) * smoothedFocusForward;
-		Vector2 flatFwd   = new Vector2(localFwd.x, localFwd.z);
-		if (flatFwd.sqrMagnitude > 0.0001f)
-			orbitAngles.y = GetAngle(flatFwd.normalized);
-
-		transform.localRotation = orbitRotation = Quaternion.Euler(orbitAngles);
-
 		lookAction = new InputAction("Look", InputActionType.Value);
 		lookAction.AddCompositeBinding("2DVector")
 			.With("Up",    "<Keyboard>/upArrow")
@@ -136,6 +111,9 @@ public class OrbitCamera : MonoBehaviour {
 			.With("Left",  "<Keyboard>/leftArrow")
 			.With("Right", "<Keyboard>/rightArrow");
 		lookAction.AddBinding("<Gamepad>/rightStick");
+
+		if (focus != null)
+			SetFocus(focus);
 	}
 
 	void OnEnable ()  => lookAction?.Enable();
@@ -143,6 +121,9 @@ public class OrbitCamera : MonoBehaviour {
 	void OnDestroy () => lookAction?.Dispose();
 
 	void LateUpdate () {
+		if (focus == null && autoFindLocalPlayer)
+			TryAssignLocalPlayerFocus();
+
 		if (focus == null) return;
 
 		UpdateGravityAlignment();
@@ -186,6 +167,46 @@ public class OrbitCamera : MonoBehaviour {
 		}
 
 		transform.SetPositionAndRotation(lookPosition, smoothedRotation);
+	}
+
+	public void SetFocus (Transform target) {
+		if (target == null) return;
+
+		focus = target;
+		focusBody  = focus.GetComponent<Rigidbody>();
+		focusPoint = previousFocusPoint = focus.position;
+
+		Vector3 startUp = CustomGravity.GetUpAxis(focusPoint);
+		gravityAlignment = startUp.sqrMagnitude > 0.001f
+			? Quaternion.FromToRotation(Vector3.up, startUp)
+			: Quaternion.identity;
+
+		smoothedFocusForward = focus.forward;
+
+		Vector3 localFwd = Quaternion.Inverse(gravityAlignment) * smoothedFocusForward;
+		Vector2 flatFwd  = new Vector2(localFwd.x, localFwd.z);
+		if (flatFwd.sqrMagnitude > 0.0001f)
+			orbitAngles.y = GetAngle(flatFwd.normalized);
+
+		transform.localRotation = orbitRotation = Quaternion.Euler(orbitAngles);
+	}
+
+	void TryAssignLocalPlayerFocus () {
+		var cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
+
+		foreach (MovingCar car in cars) {
+			if (car != null && car.IsSpawned && car.IsOwner) {
+				SetFocus(car.transform);
+				return;
+			}
+		}
+
+		foreach (MovingCar car in cars) {
+			if (car != null && !car.IsSpawned) {
+				SetFocus(car.transform);
+				return;
+			}
+		}
 	}
 
 	void UpdateGravityAlignment () {
