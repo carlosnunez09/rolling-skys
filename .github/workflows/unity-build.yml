@@ -18,30 +18,34 @@ on:
       - Packages/**
       - ProjectSettings/**
   workflow_dispatch:
-    inputs:
-      targetPlatform:
-        description: Unity build target
-        required: true
-        default: StandaloneWindows64
-        type: choice
-        options:
-          - StandaloneWindows64
-          - StandaloneLinux64
-          - WebGL
 
 concurrency:
-  group: unity-build-${{ github.ref }}-${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+  group: unity-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build ${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+    name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows Client
+            targetPlatform: StandaloneWindows64
+            buildName: rolling-skys-windows
+            artifactName: rolling-skys-windows-exe
+            customParameters: ""
+          - name: Linux Server
+            targetPlatform: StandaloneLinux64
+            buildName: rolling-skys-linux-server
+            artifactName: rolling-skys-linux-server
+            customParameters: -standaloneBuildSubtarget Server
 
     env:
-      BUILD_TARGET: ${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+      BUILD_TARGET: ${{ matrix.targetPlatform }}
 
     steps:
       - name: Checkout project
@@ -53,9 +57,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: Library
-          key: Library-${{ runner.os }}-${{ env.BUILD_TARGET }}-${{ hashFiles('ProjectSettings/ProjectVersion.txt', 'Packages/manifest.json', 'Packages/packages-lock.json') }}
+          key: Library-${{ runner.os }}-${{ matrix.name }}-${{ env.BUILD_TARGET }}-${{ hashFiles('ProjectSettings/ProjectVersion.txt', 'Packages/manifest.json', 'Packages/packages-lock.json') }}
           restore-keys: |
-            Library-${{ runner.os }}-${{ env.BUILD_TARGET }}-
+            Library-${{ runner.os }}-${{ matrix.name }}-${{ env.BUILD_TARGET }}-
             Library-${{ runner.os }}-
 
       - name: Build Unity project
@@ -68,12 +72,13 @@ jobs:
         with:
           unityVersion: auto
           targetPlatform: ${{ env.BUILD_TARGET }}
-          buildName: rolling-skys
+          buildName: ${{ matrix.buildName }}
           buildsPath: build
+          customParameters: ${{ matrix.customParameters }}
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rolling-skys-${{ env.BUILD_TARGET }}
+          name: ${{ matrix.artifactName }}
           path: build
           if-no-files-found: error
