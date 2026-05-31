@@ -48,7 +48,6 @@ jobs:
 
     env:
       BUILD_TARGET: ${{ matrix.targetPlatform }}
-      ZIP_NAME: ${{ matrix.artifactName }}-${{ github.sha }}.zip
 
     steps:
       - name: Checkout project
@@ -89,6 +88,17 @@ jobs:
           buildsPath: build
           customParameters: ${{ matrix.customParameters }}
 
+      - name: Choose package name
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $suffix = "${{ github.ref_name }}"
+          } else {
+            $suffix = "${{ github.sha }}".Substring(0, 7)
+          }
+
+          "ZIP_NAME=${{ matrix.artifactName }}-$suffix.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Package release file
         shell: pwsh
         run: |
@@ -122,3 +132,10 @@ jobs:
         with:
           files: release/*.zip
           fail_on_unmatched_files: true
+          body: |
+            Download one of the build zip files below.
+
+            - Windows client: `rolling-skys-windows-exe-${{ github.ref_name }}.zip`
+            - Linux server: `rolling-skys-linux-server-${{ github.ref_name }}.zip`
+
+            GitHub also shows automatic "Source code" archives on every release. Those are not the playable game builds.
