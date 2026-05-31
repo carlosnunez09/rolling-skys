@@ -1,0 +1,54 @@
+name: Auto Patch Release Tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Tag next patch release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create next v0.0.x tag for feature commits
+        shell: bash
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          first_line="$(printf '%s' "$COMMIT_MESSAGE" | sed -n '1p')"
+          feat_pattern='^feat($|[(:])'
+          if [[ ! "$first_line" =~ $feat_pattern ]]; then
+            echo "Latest commit is not a feat commit: $first_line"
+            exit 0
+          fi
+
+          git fetch --tags --force
+
+          latest_tag="$(git tag -l 'v0.0.*' --sort=-v:refname | head -n 1)"
+          if [[ -z "$latest_tag" ]]; then
+            next_tag="v0.0.1"
+          else
+            patch="${latest_tag##*.}"
+            next_tag="v0.0.$((patch + 1))"
+          fi
+
+          if git rev-parse "$next_tag" >/dev/null 2>&1; then
+            echo "Tag already exists: $next_tag"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$next_tag" -m "$next_tag"
+          git push origin "$next_tag"

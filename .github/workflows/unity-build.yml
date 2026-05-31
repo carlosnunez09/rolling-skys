@@ -65,6 +65,16 @@ jobs:
             Library-${{ runner.os }}-${{ matrix.name }}-${{ env.BUILD_TARGET }}-
             Library-${{ runner.os }}-
 
+      - name: Stamp Unity version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $projectSettingsPath = "ProjectSettings/ProjectSettings.asset"
+          $settings = Get-Content -Raw -Path $projectSettingsPath
+          $settings = $settings -replace 'bundleVersion: .+', "bundleVersion: $version"
+          Set-Content -Path $projectSettingsPath -Value $settings -NoNewline
+
       - name: Build Unity project
         uses: game-ci/unity-builder@v4
         env:
