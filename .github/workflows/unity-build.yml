@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - networking-branch
+    tags:
+      - v*
     paths:
       - .github/workflows/unity-build.yml
       - Assets/**
@@ -46,6 +48,7 @@ jobs:
 
     env:
       BUILD_TARGET: ${{ matrix.targetPlatform }}
+      ZIP_NAME: ${{ matrix.artifactName }}-${{ github.sha }}.zip
 
     steps:
       - name: Checkout project
@@ -76,9 +79,36 @@ jobs:
           buildsPath: build
           customParameters: ${{ matrix.customParameters }}
 
-      - name: Upload build artifact
+      - name: Package release file
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path "build/*" -DestinationPath "release/$env:ZIP_NAME" -Force
+
+      - name: Upload release file
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifactName }}
-          path: build
+          path: release/*.zip
           if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.zip
+          fail_on_unmatched_files: true
