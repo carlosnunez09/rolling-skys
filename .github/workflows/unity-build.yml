@@ -1,6 +1,22 @@
 name: Unity Build
 
 on:
+  push:
+    branches:
+      - networking-branch
+    paths:
+      - .github/workflows/unity-build.yml
+      - Assets/**
+      - Packages/**
+      - ProjectSettings/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/unity-build.yml
+      - Assets/**
+      - Packages/**
+      - ProjectSettings/**
   workflow_dispatch:
     inputs:
       targetPlatform:
