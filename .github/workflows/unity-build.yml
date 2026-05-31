@@ -1,0 +1,63 @@
+name: Unity Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      targetPlatform:
+        description: Unity build target
+        required: true
+        default: StandaloneWindows64
+        type: choice
+        options:
+          - StandaloneWindows64
+          - StandaloneLinux64
+          - WebGL
+
+concurrency:
+  group: unity-build-${{ github.ref }}-${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      BUILD_TARGET: ${{ github.event.inputs.targetPlatform || 'StandaloneWindows64' }}
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ runner.os }}-${{ env.BUILD_TARGET }}-${{ hashFiles('ProjectSettings/ProjectVersion.txt', 'Packages/manifest.json', 'Packages/packages-lock.json') }}
+          restore-keys: |
+            Library-${{ runner.os }}-${{ env.BUILD_TARGET }}-
+            Library-${{ runner.os }}-
+
+      - name: Build Unity project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
+        with:
+          unityVersion: auto
+          targetPlatform: ${{ env.BUILD_TARGET }}
+          buildName: rolling-skys
+          buildsPath: build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rolling-skys-${{ env.BUILD_TARGET }}
+          path: build
+          if-no-files-found: error
