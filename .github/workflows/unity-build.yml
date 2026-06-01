@@ -34,12 +34,14 @@ jobs:
             artifactName: rolling-skys-windows-exe
             customParameters: ""
             runner: ubuntu-latest
+            runAsHostUser: false
           - name: Linux Server
             targetPlatform: StandaloneLinux64
             buildName: rolling-skys-linux-server
             artifactName: rolling-skys-linux-server
             customParameters: -standaloneBuildSubtarget Server
             runner: self-hosted
+            runAsHostUser: true
 
     env:
       BUILD_TARGET: ${{ matrix.targetPlatform }}
@@ -79,7 +81,8 @@ jobs:
           targetPlatform: ${{ env.BUILD_TARGET }}
           buildName: ${{ matrix.buildName }}
           buildsPath: build
-          versioning: Tag
+          runAsHostUser: ${{ matrix.runAsHostUser }}
+          versioning: ${{ startsWith(github.ref, 'refs/tags/v') && 'Tag' || 'None' }}
           customParameters: ${{ matrix.customParameters }}
 
       - name: Choose package name
