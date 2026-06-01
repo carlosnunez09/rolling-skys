@@ -69,6 +69,16 @@ jobs:
           docker version
           docker info
 
+      - name: Free disk space for GitHub-hosted Unity image
+        if: matrix.runner == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          docker system prune -af || true
+          df -h
+
       - name: Build Unity project
         uses: game-ci/unity-builder@v4
         env:
