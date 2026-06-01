@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build:
     name: Build ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     permissions:
       contents: read
     strategy:
@@ -64,15 +64,31 @@ jobs:
             Library-${{ runner.os }}-${{ matrix.name }}-${{ env.BUILD_TARGET }}-
             Library-${{ runner.os }}-
 
+      - name: Verify runner tools are available
+        shell: bash
+        run: |
+          command -v docker
+          command -v python3
+          docker version
+          docker info
+
       - name: Stamp Unity version from release tag
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
+        shell: bash
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          $projectSettingsPath = "ProjectSettings/ProjectSettings.asset"
-          $settings = Get-Content -Raw -Path $projectSettingsPath
-          $settings = $settings -replace 'bundleVersion: .+', "bundleVersion: $version"
-          Set-Content -Path $projectSettingsPath -Value $settings -NoNewline
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          python3 - "$version" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          path = pathlib.Path("ProjectSettings/ProjectSettings.asset")
+          text = path.read_text()
+          text = re.sub(r"bundleVersion: .+", f"bundleVersion: {version}", text)
+          path.write_text(text)
+          PY
 
       - name: Build Unity project
         uses: game-ci/unity-builder@v4
@@ -89,21 +105,40 @@ jobs:
           customParameters: ${{ matrix.customParameters }}
 
       - name: Choose package name
-        shell: pwsh
+        shell: bash
         run: |
-          if ("${{ github.ref }}" -like "refs/tags/v*") {
-            $suffix = "${{ github.ref_name }}"
-          } else {
-            $suffix = "${{ github.sha }}".Substring(0, 7)
-          }
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            suffix="$GITHUB_REF_NAME"
+          else
+            suffix="${GITHUB_SHA::7}"
+          fi
 
-          "ZIP_NAME=${{ matrix.artifactName }}-$suffix.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "ZIP_NAME=${{ matrix.artifactName }}-$suffix.zip" >> "$GITHUB_ENV"
 
       - name: Package release file
-        shell: pwsh
+        shell: bash
         run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          Compress-Archive -Path "build/*" -DestinationPath "release/$env:ZIP_NAME" -Force
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import zipfile
+
+          build_dir = pathlib.Path("build")
+          zip_path = pathlib.Path("release") / os.environ["ZIP_NAME"]
+          zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+          files = [path for path in build_dir.rglob("*") if path.is_file()]
+          if not files:
+            raise SystemExit("No build files found to package.")
+
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for path in files:
+              archive.write(path, path.relative_to(build_dir))
+
+          print(f"Packaged {len(files)} files into {zip_path}")
+          PY
 
       - name: Upload release file
         uses: actions/upload-artifact@v4
@@ -114,7 +149,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
