@@ -6,11 +6,6 @@ on:
       - networking-branch
     tags:
       - v*
-    paths:
-      - .github/workflows/unity-build.yml
-      - Assets/**
-      - Packages/**
-      - ProjectSettings/**
   pull_request:
     branches:
       - main
@@ -28,7 +23,7 @@ concurrency:
 jobs:
   build:
     name: Build ${{ matrix.name }}
-    runs-on: self-hosted
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     strategy:
@@ -40,11 +35,13 @@ jobs:
             buildName: rolling-skys-windows
             artifactName: rolling-skys-windows-exe
             customParameters: ""
+            runner: ubuntu-latest
           - name: Linux Server
             targetPlatform: StandaloneLinux64
             buildName: rolling-skys-linux-server
             artifactName: rolling-skys-linux-server
             customParameters: -standaloneBuildSubtarget Server
+            runner: self-hosted
 
     env:
       BUILD_TARGET: ${{ matrix.targetPlatform }}
@@ -149,7 +146,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
