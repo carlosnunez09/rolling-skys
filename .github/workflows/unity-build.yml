@@ -99,6 +99,7 @@ jobs:
           targetPlatform: ${{ env.BUILD_TARGET }}
           buildName: ${{ matrix.buildName }}
           buildsPath: build
+          versioning: None
           customParameters: ${{ matrix.customParameters }}
 
       - name: Choose package name
