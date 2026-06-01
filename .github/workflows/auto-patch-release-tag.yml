@@ -27,6 +27,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          git fetch origin main --force
+          latest_main="$(git rev-parse origin/main)"
+          current_commit="$(git rev-parse HEAD)"
+          if [[ "$current_commit" != "$latest_main" ]]; then
+            echo "Skipping stale tag run. HEAD is $current_commit, but origin/main is $latest_main."
+            exit 0
+          fi
+
           first_line="$(printf '%s' "$COMMIT_MESSAGE" | sed -n '1p')"
           feat_pattern='^feat($|[(:])'
           if [[ ! "$first_line" =~ $feat_pattern ]]; then
