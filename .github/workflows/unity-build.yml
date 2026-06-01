@@ -145,6 +145,11 @@ jobs:
           path: release/*.zip
           if-no-files-found: error
 
+      - name: Fix permissions for runner cleanup
+        if: always() && matrix.runner == 'self-hosted'
+        shell: bash
+        run: docker run --rm -v /home/carlos/actions-runner/_work:/work alpine chown -R $(id -u):$(id -g) /work
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
