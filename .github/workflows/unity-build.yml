@@ -3,7 +3,7 @@ name: Unity Build
 on:
   push:
     branches:
-      - networking-branch
+      - main
     tags:
       - v*
   pull_request:
@@ -171,3 +171,24 @@ jobs:
             - Linux server: `rolling-skys-linux-server-${{ github.ref_name }}.zip`
 
             GitHub also shows automatic "Source code" archives on every release. Those are not the playable game builds.
+
+  deploy:
+    name: Deploy Dev Server
+    runs-on: self-hosted
+    needs: build
+    if: github.event_name != 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout project (for deploy script + Dockerfile)
+        uses: actions/checkout@v4
+
+      - name: Deploy server from CI artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          chmod +x scripts/deploy-server.sh
+          ./scripts/deploy-server.sh

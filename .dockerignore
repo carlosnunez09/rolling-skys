@@ -1,0 +1,6 @@
+**
+!Dockerfile.server
+!deploy/
+!deploy/docker-context/
+!deploy/docker-context/app/
+!deploy/docker-context/app/**
