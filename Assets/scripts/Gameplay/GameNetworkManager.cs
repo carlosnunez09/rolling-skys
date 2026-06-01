@@ -11,7 +11,9 @@ public class GameNetworkManager : MonoBehaviour {
 
     [Header("Network")]
     [SerializeField] ushort _port = 7777;
+    [SerializeField] string _serverAddress = "127.0.0.1";
     [SerializeField] string _listenAddress = "0.0.0.0";
+    [SerializeField] bool _connectAutomatically;
 
     [Header("Scene")]
     [SerializeField] string _gameSceneName = "SampleScene";
@@ -31,6 +33,8 @@ public class GameNetworkManager : MonoBehaviour {
     public bool IsClient    => NetworkManager.Singleton != null && NetworkManager.Singleton.IsClient;
     public bool IsServer    => NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
     public ushort Port      => _port;
+    public string ServerAddress => _serverAddress;
+    public bool ConnectAutomatically => _connectAutomatically;
     public string StatusMessage => _statusMessage;
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -59,6 +63,9 @@ public class GameNetworkManager : MonoBehaviour {
 
 #if UNITY_SERVER && !UNITY_EDITOR
         StartServer();
+#else
+        if (_connectAutomatically)
+            StartClient();
 #endif
     }
 
@@ -96,8 +103,13 @@ public class GameNetworkManager : MonoBehaviour {
         NetworkManager.Singleton.SceneManager.LoadScene(_gameSceneName, LoadSceneMode.Single);
     }
 
+    /// <summary>Connect to the configured host. The server will push the game scene.</summary>
+    public void StartClient () {
+        StartClient(BuildConfiguredEndpoint());
+    }
+
     /// <summary>Connect to a host at the given address. The server will push the game scene.</summary>
-    public void StartClient (string endpoint) {
+    void StartClient (string endpoint) {
         if (!CanStartNetwork()) return;
         if (!TryParseEndpoint(endpoint, out string targetAddress, out ushort targetPort)) {
             _statusMessage = $"Invalid server address: {endpoint}";
@@ -398,8 +410,16 @@ public class GameNetworkManager : MonoBehaviour {
             if (args[i].Equals("-listen", StringComparison.OrdinalIgnoreCase))
                 _listenAddress = args[i + 1];
 
+            if (args[i].Equals("-address", StringComparison.OrdinalIgnoreCase))
+                _serverAddress = args[i + 1];
+
             if (args[i].Equals("-scene", StringComparison.OrdinalIgnoreCase))
                 _gameSceneName = args[i + 1];
         }
+    }
+
+    string BuildConfiguredEndpoint () {
+        string address = string.IsNullOrWhiteSpace(_serverAddress) ? "127.0.0.1" : _serverAddress.Trim();
+        return $"{address}:{_port}";
     }
 }

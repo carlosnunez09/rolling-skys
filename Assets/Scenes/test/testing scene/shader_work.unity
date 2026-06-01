@@ -1250,7 +1250,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameNetworkManager
   _port: 7777
+  _serverAddress: 127.0.0.1
   _listenAddress: 0.0.0.0
+  _connectAutomatically: 0
+  _gameSceneName: SampleScene
   _carPrefab: {fileID: 7533576010813298830, guid: 26155bc2712ba9944aaa243b19cc0314, type: 3}
   _spawnPoints: []
   _findSpawnPointsByTag: 1
@@ -1350,7 +1353,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42964eab821ae114fb3f9387b4da6ad4, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MainMenuNetworkUI
-  _addressInput: {fileID: 1456220728}
   _hostButton: {fileID: 165704319}
   _clientButton: {fileID: 380325372}
   _disconnectButton: {fileID: 1208032633}
@@ -1371,7 +1373,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1456220727
 RectTransform:
   m_ObjectHideFlags: 0

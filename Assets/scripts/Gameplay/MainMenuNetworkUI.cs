@@ -5,7 +5,6 @@ using UnityEngine.UI;
 
 public class MainMenuNetworkUI : MonoBehaviour {
 
-    [SerializeField] TMP_InputField _addressInput;
     [SerializeField] Button _hostButton;
     [SerializeField] Button _clientButton;
     [SerializeField] Button _disconnectButton;
@@ -19,9 +18,6 @@ public class MainMenuNetworkUI : MonoBehaviour {
         _hostButton?.onClick.AddListener(StartHost);
         _clientButton?.onClick.AddListener(StartClient);
         _disconnectButton?.onClick.AddListener(Disconnect);
-
-        if (_addressInput != null && string.IsNullOrWhiteSpace(_addressInput.text))
-            _addressInput.text = "127.0.0.1:7777";
 #endif
     }
 
@@ -40,8 +36,7 @@ public class MainMenuNetworkUI : MonoBehaviour {
     }
 
     public void StartClient () {
-        string address = _addressInput != null ? _addressInput.text : "127.0.0.1:7777";
-        GameNetworkManager.Instance?.StartClient(address);
+        GameNetworkManager.Instance?.StartClient();
     }
 
     public void Disconnect () {
