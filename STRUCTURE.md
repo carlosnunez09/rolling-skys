@@ -2,6 +2,8 @@
 
 Unity 6 project. All game content lives under `Assets/`. Third-party assets are isolated under `Assets/ThirdParty/` and should not be edited.
 
+Multiplayer host/server/client setup is documented in [`NETWORKING.md`](NETWORKING.md).
+
 ---
 
 ## Assets/
@@ -73,6 +75,9 @@ Scripts/
 ├── Gameplay/
 │   ├── BoostPad.cs             Trigger that applies a speed impulse
 │   ├── CarHUD.cs               HUD display for race state
+│   ├── GameNetworkManager.cs   Netcode host/server/client session bootstrap
+│   ├── MainMenuNetworkUI.cs    Main menu Host/Server/Client controls
+│   ├── NetworkCarController.cs Networked player identity / name tags
 │   ├── GrassTrampler.cs        Bends GPU grass on contact
 │   ├── MovingCar.cs            Spherical-world car controller
 │   ├── MovingSphere.cs         Spherical-world ball controller

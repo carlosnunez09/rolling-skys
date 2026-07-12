@@ -361,27 +361,30 @@ public class RaceRuntime : NetworkBehaviour {
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     void BuildRacerList () {
-#if UNITY_SERVER && !UNITY_EDITOR
-        // Server builds the list once all players have spawned.
-        // Called again from OnPlayerConnected when late joiners arrive.
-        var allCars = FindObjectsByType<MovingCar>(FindObjectsSortMode.None);
-        _racers = new RacerState[allCars.Length];
-        for (int i = 0; i < allCars.Length; i++) {
-            var net = allCars[i].GetComponent<NetworkObject>();
-            _racers[i] = new RacerState {
-                Name = $"Player {net.OwnerClientId}",
-                Car  = allCars[i]
-            };
+        // Host/dedicated server own the authoritative racer list for every spawned car.
+        // Clients keep a local HUD-focused list for the owned car.
+        bool isAuthoritativeServer = IsSpawned
+            ? IsServer
+            : NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
+
+        if (isAuthoritativeServer) {
+            var allCars = FindObjectsByType<MovingCar>(FindObjectsSortMode.None);
+            _racers = new RacerState[allCars.Length];
+            for (int i = 0; i < allCars.Length; i++) {
+                var net = allCars[i].GetComponent<NetworkObject>();
+                _racers[i] = new RacerState {
+                    Name = net != null ? $"Player {net.OwnerClientId}" : allCars[i].name,
+                    Car  = allCars[i]
+                };
+            }
+            return;
         }
-#else
-        // Client keeps the original single-player list for local HUD.
-        // The server is authoritative on positions/laps — client just displays.
+
         if (_playerCar == null) {
             _racers = System.Array.Empty<RacerState>();
             return;
         }
         _racers = new[] { new RacerState { Name = "Player", Car = _playerCar } };
-#endif
     }
 
     /// <summary>

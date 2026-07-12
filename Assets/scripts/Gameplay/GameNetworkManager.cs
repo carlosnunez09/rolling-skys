@@ -61,7 +61,8 @@ public class GameNetworkManager : MonoBehaviour {
                            "Ensure NetworkManager is in the scene and initialises before this script.");
         }
 
-#if UNITY_SERVER && !UNITY_EDITOR
+#if UNITY_SERVER
+        // Dedicated server builds and Unity Multiplayer Role = Server both define UNITY_SERVER.
         StartServer();
 #else
         if (_connectAutomatically)
@@ -109,7 +110,7 @@ public class GameNetworkManager : MonoBehaviour {
     }
 
     /// <summary>Connect to a host at the given address. The server will push the game scene.</summary>
-    void StartClient (string endpoint) {
+    public void StartClient (string endpoint) {
         if (!CanStartNetwork()) return;
         if (!TryParseEndpoint(endpoint, out string targetAddress, out ushort targetPort)) {
             _statusMessage = $"Invalid server address: {endpoint}";
@@ -117,6 +118,8 @@ public class GameNetworkManager : MonoBehaviour {
             return;
         }
 
+        _serverAddress = targetAddress;
+        _port = targetPort;
         _lastTargetAddress = $"{targetAddress}:{targetPort}";
         if (!ConfigureUnityTransport(targetAddress, targetPort, null)) return;
         bool started = NetworkManager.Singleton.StartClient();
@@ -124,6 +127,18 @@ public class GameNetworkManager : MonoBehaviour {
             ? $"Connecting to {targetAddress}:{targetPort}"
             : $"Failed to start client for {targetAddress}:{targetPort}";
         Debug.Log($"GameNetworkManager: Client connect started: {started}, address: {targetAddress}, port: {targetPort}. This only means the client began connecting; OnClientConnected confirms success.");
+    }
+
+    /// <summary>Update the default client endpoint used by StartClient() and auto-connect.</summary>
+    public void SetClientEndpoint (string endpoint) {
+        if (!TryParseEndpoint(endpoint, out string targetAddress, out ushort targetPort)) {
+            Debug.LogError($"GameNetworkManager: Invalid server endpoint '{endpoint}'.");
+            return;
+        }
+
+        _serverAddress = targetAddress;
+        _port = targetPort;
+        _lastTargetAddress = $"{targetAddress}:{targetPort}";
     }
 
     /// <summary>Disconnect and reset session state so a new session can be started.</summary>
