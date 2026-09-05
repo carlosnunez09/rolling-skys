@@ -667,6 +667,17 @@ public class MovingCar : NetworkBehaviour {
 			_airRoll  = 0f;
 			_jumpActive = false;
 			_jumpCooldownTimer = jumpCooldown;
+		} else if (wasGrounded && !OnGround) {
+			// Takeoff / Launch — seamlessly absorb drift angle into yaw heading
+			// and ensure drift rotation speed carries into airborne yaw velocity!
+			float driftSign = _driftDirection != 0f ? _driftDirection : (Mathf.Abs(_driftAngle) > 5f ? Mathf.Sign(_driftAngle) : 0f);
+			yaw += _driftAngle;
+			_driftAngle = 0f;
+			if (driftSign != 0f) {
+				float minDriftSpin = driftSign * 65f;
+				if (driftSign > 0f && yawVelocity < minDriftSpin) yawVelocity = minDriftSpin;
+				else if (driftSign < 0f && yawVelocity > minDriftSpin) yawVelocity = minDriftSpin;
+			}
 		}
 		wasGrounded = OnGround;
 		landingSlip = Mathf.MoveTowards(landingSlip, 0f, slipRecoveryRate * Time.fixedDeltaTime);
@@ -724,6 +735,8 @@ public class MovingCar : NetworkBehaviour {
 				if (_driftDirection == 0f) {
 					if (Mathf.Abs(steer) > 0.15f) {
 						_driftDirection = Mathf.Sign(steer);
+					} else if (Mathf.Abs(landingYawVelocity) > 20f && landingSlip > 0.05f) {
+						_driftDirection = Mathf.Sign(landingYawVelocity);
 					} else {
 						float latVel = Vector3.Dot(velocity, right);
 						if (Mathf.Abs(latVel) > 2.0f)
@@ -841,16 +854,17 @@ public class MovingCar : NetworkBehaviour {
 		} else {
 			// ── In-Air Control, Auto-Righting & Landing Pre-Alignment ─────────
 			_statDownforce    = 0f;
-			_driftAngle       = Mathf.MoveTowards(_driftAngle, 0f, 15f * Time.fixedDeltaTime);
+			_driftAngle       = 0f;
 			_driftChargeTimer = 0f;
 			_miniTurboReady   = false;
 			_driftDirection   = 0f;
 
-			yawVelocity = Mathf.MoveTowards(yawVelocity, 0f, airAngularDamping * 20f * Time.fixedDeltaTime);
+			// Conserve rotation speed in the air with gentle aerodynamic damping
+			yawVelocity = Mathf.MoveTowards(yawVelocity, 0f, airAngularDamping * 1.5f * Time.fixedDeltaTime);
 
 			float pitchInput = throttle;
-			float yawInput   = isDrifting ? 0f : steer;
-			float rollInput  = isDrifting ? -steer : 0f;
+			float yawInput   = steer;
+			float rollInput  = isDrifting ? -steer * 0.75f : 0f;
 
 			yaw += (yawInput * airYawSpeed + yawVelocity) * Time.fixedDeltaTime;
 
@@ -887,6 +901,17 @@ public class MovingCar : NetworkBehaviour {
 			_jumpActive        = true;
 			_jumpHoldTimer     = 0f;
 			stepsSinceLastJump = 0;
+
+			// Seamlessly transfer drift angle into yaw heading upon jump launch
+			// and guarantee drift spin momentum carries into the jump
+			float driftSign = _driftDirection != 0f ? _driftDirection : (Mathf.Abs(_driftAngle) > 5f ? Mathf.Sign(_driftAngle) : 0f);
+			yaw += _driftAngle;
+			_driftAngle = 0f;
+			if (driftSign != 0f) {
+				float minDriftSpin = driftSign * 65f;
+				if (driftSign > 0f && yawVelocity < minDriftSpin) yawVelocity = minDriftSpin;
+				else if (driftSign < 0f && yawVelocity > minDriftSpin) yawVelocity = minDriftSpin;
+			}
 
 			float gMag         = gravity.magnitude;
 			float launchSpeed  = Mathf.Sqrt(2f * gMag * minJumpHeight);
