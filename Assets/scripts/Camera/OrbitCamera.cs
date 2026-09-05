@@ -19,13 +19,54 @@ public class OrbitCamera : MonoBehaviour {
 	[BoxGroup("Focus"), SerializeField, Range(0f, 1f), Label("Centering Speed")]
 	float focusCentering = 0.5f;
 
+	[BoxGroup("Focus"), SerializeField, Range(0f, 5f), Label("Focus Height Offset  m")]
+	float focusHeightOffset = 0.75f;
+
 	// ── Distance & Occlusion ──────────────────────────────────────────
 
-	[BoxGroup("Distance"), SerializeField, Range(1f, 20f)]
+	[BoxGroup("Distance"), SerializeField, Range(1f, 50f)]
 	float distance = 5f;
 
 	[BoxGroup("Distance"), SerializeField]
 	LayerMask obstructionMask = -1;
+
+	// ── Cinematic Orbit ───────────────────────────────────────────────
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Enable Cinematic Mode")]
+	bool enableCinematicOrbit = true;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Auto-Engage When Idle")]
+	bool autoCinematicWhenIdle = true;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(1f, 30f), Label("Idle Delay  s")]
+	float idleTimeToCinematic = 4.0f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Exit On Movement")]
+	bool exitCinematicOnMove = true;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Toggle Key (C / D-Pad Up)")]
+	bool allowKeyToggle = true;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(-90f, 90f), Label("Orbit Speed  °/s")]
+	float cinematicOrbitSpeed = 15f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(2f, 50f), Label("Cinematic Distance  m")]
+	float cinematicDistance = 8.5f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 85f), Label("Base Pitch  °")]
+	float cinematicBasePitch = 18f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 30f), Label("Pitch Wave Amp  °")]
+	float cinematicPitchWaveAmp = 6f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0.02f, 2f), Label("Wave Frequency  Hz")]
+	float cinematicWaveFrequency = 0.2f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 10f), Label("Distance Breath Amp  m")]
+	float cinematicDistanceBreath = 1.0f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0.5f, 10f), Label("Transition Speed")]
+	float cinematicTransitionSpeed = 2.5f;
 
 	// ── Rotation ──────────────────────────────────────────────────────
 
@@ -74,6 +115,7 @@ public class OrbitCamera : MonoBehaviour {
 	Vector3 smoothedFocusForward;   // initialised from focus.forward in Awake
 
 	InputAction lookAction;
+	InputAction cinematicToggleAction;
 
 	Vector3 focusPoint, previousFocusPoint;
 
@@ -84,6 +126,24 @@ public class OrbitCamera : MonoBehaviour {
 	Quaternion gravityAlignment = Quaternion.identity;  // overwritten in Awake
 
 	Quaternion orbitRotation;
+
+	// Cinematic Orbit Runtime State
+	bool _manualCinematic;
+	bool _idleCinematic;
+	float _idleTimer;
+	float _cinematicWeight;
+	float _cinematicWaveTimer;
+	float _cinematicTargetDistance;
+
+	public bool IsCinematicActive => enableCinematicOrbit && (_manualCinematic || _idleCinematic);
+	public float CinematicWeight  => _cinematicWeight;
+
+	public void SetCinematicMode (bool active) {
+		_manualCinematic = active;
+		if (!active) _idleCinematic = false;
+	}
+
+	public void ToggleCinematicMode () => SetCinematicMode(!IsCinematicActive);
 
 	Vector3 CameraHalfExtends {
 		get {
@@ -103,6 +163,7 @@ public class OrbitCamera : MonoBehaviour {
 
 	void Awake () {
 		regularCamera = GetComponent<Camera>();
+		_cinematicTargetDistance = distance;
 
 		lookAction = new InputAction("Look", InputActionType.Value);
 		lookAction.AddCompositeBinding("2DVector")
@@ -112,13 +173,29 @@ public class OrbitCamera : MonoBehaviour {
 			.With("Right", "<Keyboard>/rightArrow");
 		lookAction.AddBinding("<Gamepad>/rightStick");
 
+		cinematicToggleAction = new InputAction("CinematicToggle", InputActionType.Button);
+		cinematicToggleAction.AddBinding("<Keyboard>/c");
+		cinematicToggleAction.AddBinding("<Gamepad>/dpad/up");
+		cinematicToggleAction.AddBinding("<Gamepad>/select");
+
 		if (focus != null)
 			SetFocus(focus);
 	}
 
-	void OnEnable ()  => lookAction?.Enable();
-	void OnDisable () => lookAction?.Disable();
-	void OnDestroy () => lookAction?.Dispose();
+	void OnEnable () {
+		lookAction?.Enable();
+		cinematicToggleAction?.Enable();
+	}
+
+	void OnDisable () {
+		lookAction?.Disable();
+		cinematicToggleAction?.Disable();
+	}
+
+	void OnDestroy () {
+		lookAction?.Dispose();
+		cinematicToggleAction?.Dispose();
+	}
 
 	void LateUpdate () {
 		if (focus == null && autoFindLocalPlayer)
@@ -129,29 +206,40 @@ public class OrbitCamera : MonoBehaviour {
 		UpdateGravityAlignment();
 		UpdateFocusPoint();
 
-		if (ManualRotation() || AutomaticRotation())
-			ConstrainAngles();
+		UpdateCinematicState();
 
-		UpdatePitchFromSpeed();
+		if (ManualRotation()) {
+			ConstrainAngles();
+		} else if (_cinematicWeight > 0.95f) {
+			orbitAngles.y += cinematicOrbitSpeed * Time.deltaTime;
+			ConstrainAngles();
+		} else {
+			if (AutomaticRotation())
+				ConstrainAngles();
+			if (_cinematicWeight > 0.001f) {
+				orbitAngles.y += cinematicOrbitSpeed * _cinematicWeight * Time.deltaTime;
+				ConstrainAngles();
+			}
+		}
+
+		UpdatePitch();
 
 		orbitRotation = Quaternion.Euler(orbitAngles);
 		Quaternion lookRotation = gravityAlignment * orbitRotation;
 
 		// Smooth rotation FIRST, then derive the position from the smoothed rotation.
-		// Previously: position came from the unsmoothed lookRotation, rotation was
-		// smoothed — that mismatch made the view direction disagree with the camera's
-		// physical position every frame, causing constant jitter.
 		Quaternion smoothedRotation = Quaternion.Slerp(
 			transform.rotation, lookRotation,
 			Mathf.Clamp01(rotationSmoothSpeed * Time.deltaTime));
 
+		float currentDist = Mathf.Lerp(distance, _cinematicTargetDistance, _cinematicWeight);
 		Vector3 lookDirection = smoothedRotation * Vector3.forward;
-		Vector3 lookPosition  = focusPoint - lookDirection * distance;
+		Vector3 lookPosition  = focusPoint - lookDirection * currentDist;
 
 		// Occlusion — box cast from the focus point toward the camera's near plane.
 		Vector3 rectOffset    = lookDirection * regularCamera.nearClipPlane;
 		Vector3 rectPosition  = lookPosition + rectOffset;
-		Vector3 castFrom      = focus.position;
+		Vector3 castFrom      = focusPoint;
 		Vector3 castLine      = rectPosition - castFrom;
 		float   castDistance  = castLine.magnitude;
 
@@ -174,12 +262,12 @@ public class OrbitCamera : MonoBehaviour {
 
 		focus = target;
 		focusBody  = focus.GetComponent<Rigidbody>();
-		focusPoint = previousFocusPoint = focus.position;
-
-		Vector3 startUp = CustomGravity.GetUpAxis(focusPoint);
+		Vector3 startUp = CustomGravity.GetUpAxis(focus.position);
 		gravityAlignment = startUp.sqrMagnitude > 0.001f
 			? Quaternion.FromToRotation(Vector3.up, startUp)
 			: Quaternion.identity;
+
+		focusPoint = previousFocusPoint = focus.position + (gravityAlignment * Vector3.up) * focusHeightOffset;
 
 		smoothedFocusForward = focus.forward;
 
@@ -234,7 +322,7 @@ public class OrbitCamera : MonoBehaviour {
 
 	void UpdateFocusPoint () {
 		previousFocusPoint = focusPoint;
-		Vector3 targetPoint = focus.position;
+		Vector3 targetPoint = focus.position + (gravityAlignment * Vector3.up) * focusHeightOffset;
 		if (focusRadius > 0f) {
 			float dist = Vector3.Distance(targetPoint, focusPoint);
 			float t = 1f;
@@ -245,6 +333,50 @@ public class OrbitCamera : MonoBehaviour {
 			focusPoint = Vector3.Lerp(targetPoint, focusPoint, t);
 		} else {
 			focusPoint = targetPoint;
+		}
+	}
+
+	void UpdateCinematicState () {
+		if (!enableCinematicOrbit) {
+			_manualCinematic = false;
+			_idleCinematic   = false;
+			_cinematicWeight = Mathf.MoveTowards(_cinematicWeight, 0f, cinematicTransitionSpeed * Time.deltaTime);
+			_cinematicTargetDistance = distance;
+			return;
+		}
+
+		// Key toggle
+		if (allowKeyToggle && cinematicToggleAction != null && cinematicToggleAction.WasPressedThisFrame()) {
+			_manualCinematic = !_manualCinematic;
+			if (_manualCinematic) _cinematicWaveTimer = 0f;
+		}
+
+		// Idle check based on focus vehicle speed and look input
+		float rawSpeed = focusBody != null ? focusBody.linearVelocity.magnitude : 0f;
+		Vector2 lookInput = lookAction != null ? lookAction.ReadValue<Vector2>() : Vector2.zero;
+
+		if (rawSpeed < 0.8f && lookInput.sqrMagnitude < 0.01f) {
+			_idleTimer += Time.deltaTime;
+			if (autoCinematicWhenIdle && _idleTimer >= idleTimeToCinematic) {
+				_idleCinematic = true;
+			}
+		} else {
+			_idleTimer = 0f;
+			_idleCinematic = false;
+			if (exitCinematicOnMove && rawSpeed > 1.8f) {
+				_manualCinematic = false;
+			}
+		}
+
+		bool active = _manualCinematic || _idleCinematic;
+		_cinematicWeight = Mathf.MoveTowards(_cinematicWeight, active ? 1f : 0f, cinematicTransitionSpeed * Time.deltaTime);
+
+		if (_cinematicWeight > 0.001f) {
+			_cinematicWaveTimer += Time.deltaTime;
+			float distBreath = Mathf.Cos(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicDistanceBreath;
+			_cinematicTargetDistance = cinematicDistance + distBreath;
+		} else {
+			_cinematicTargetDistance = distance;
 		}
 	}
 
@@ -259,7 +391,7 @@ public class OrbitCamera : MonoBehaviour {
 		return false;
 	}
 
-	void UpdatePitchFromSpeed () {
+	void UpdatePitch () {
 		float rawSpeed = focusBody != null ? focusBody.linearVelocity.magnitude : 0f;
 		// Dead-zone: physics solver noise up to ~0.5 m/s when stopped.
 		if (rawSpeed < 1f) rawSpeed = 0f;
@@ -267,8 +399,15 @@ public class OrbitCamera : MonoBehaviour {
 		if (smoothedSpeed < 0.05f) smoothedSpeed = 0f;
 
 		float t           = Mathf.Clamp01(smoothedSpeed / speedForFullAngle);
-		float targetPitch = Mathf.Lerp(topDownAngle, behindAngle, t);
-		orbitAngles.x     = Mathf.Lerp(orbitAngles.x, targetPitch, pitchSmoothSpeed * Time.deltaTime);
+		float drivingPitch = Mathf.Lerp(topDownAngle, behindAngle, t);
+
+		if (_cinematicWeight > 0.001f) {
+			float wavePitch = cinematicBasePitch + Mathf.Sin(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicPitchWaveAmp;
+			float targetPitch = Mathf.Lerp(drivingPitch, wavePitch, _cinematicWeight);
+			orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetPitch, pitchSmoothSpeed * Time.deltaTime);
+		} else {
+			orbitAngles.x = Mathf.Lerp(orbitAngles.x, drivingPitch, pitchSmoothSpeed * Time.deltaTime);
+		}
 	}
 
 	bool AutomaticRotation () {

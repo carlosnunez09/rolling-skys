@@ -42,6 +42,12 @@ public class RaceRuntime : NetworkBehaviour {
     [Tooltip("Height above the waypoint's local up axis to place the marker.")]
     [SerializeField] float _checkpointMarkerHeight = 5f;
 
+    [Header("Cinematic Camera")]
+    [Tooltip("Trigger cinematic orbit camera during pre-race countdown.")]
+    [SerializeField] bool _cinematicCountdown = true;
+    [Tooltip("Trigger cinematic orbit camera when race finishes.")]
+    [SerializeField] bool _cinematicFinish = true;
+
     // ── Events ─────────────────────────────────────────────────────────────────
 
     [Header("Events")]
@@ -175,6 +181,9 @@ public class RaceRuntime : NetworkBehaviour {
         SetArrowVisible(false);
         SetText(_statusText,    "");
         SetText(_countdownText, Mathf.CeilToInt(_countdownSeconds).ToString());
+
+        if (_cinematicCountdown && _camera != null)
+            _camera.SetCinematicMode(true);
     }
 
     void TickCountdown () {
@@ -195,6 +204,9 @@ public class RaceRuntime : NetworkBehaviour {
         SetCarInput(true);
         SetArrowVisible(true);
         SpawnCheckpointMarkers();
+
+        if (_camera != null)
+            _camera.SetCinematicMode(false);
     }
 
     // ── Race Tick ──────────────────────────────────────────────────────────────
@@ -215,6 +227,9 @@ public class RaceRuntime : NetworkBehaviour {
             RemoveCheckpointMarkers();
             Phase = RacePhase.Finished;
             _onRaceEnd?.Invoke();
+
+            if (_cinematicFinish && _camera != null)
+                _camera.SetCinematicMode(true);
         }
     }
 
