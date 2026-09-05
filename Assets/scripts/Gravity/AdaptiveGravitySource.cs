@@ -40,6 +40,16 @@ public class AdaptiveGravitySource : GravitySource {
 	[BoxGroup("Gravity"), SerializeField, Range(0f, 30f)]
 	float gravityStrength = 9.81f;
 
+	public override float GravityStrength => gravityStrength;
+
+	public override int Priority {
+		get {
+			if (base.Priority != 0) return base.Priority;
+			return (shape == GravityShape.Sphere && outerRadius > 100f) ? 0 : 1;
+		}
+		set => base.Priority = value;
+	}
+
 	// ─────────────────────────────────────────────────────────────────
 	//  Sphere
 	// ─────────────────────────────────────────────────────────────────

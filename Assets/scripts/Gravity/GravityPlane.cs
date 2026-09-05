@@ -1,9 +1,16 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 public class GravityPlane : GravitySource {
 
 	[SerializeField]
 	float gravity = 9.81f;
+
+	public override float GravityStrength => gravity;
+
+	public override int Priority {
+		get => base.Priority != 0 ? base.Priority : 1;
+		set => base.Priority = value;
+	}
 
 	[SerializeField, Min(0f)]
 	float range = 1f;

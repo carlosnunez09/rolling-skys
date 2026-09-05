@@ -1,9 +1,19 @@
-﻿using UnityEngine;
+using UnityEngine;
 
 public class GravitySphere : GravitySource {
 
 	[SerializeField]
 	float gravity = 9.81f;
+
+	public override float GravityStrength => gravity;
+
+	public override int Priority {
+		get {
+			if (base.Priority != 0) return base.Priority;
+			return outerRadius <= 100f ? 1 : 0;
+		}
+		set => base.Priority = value;
+	}
 
 	[SerializeField, Min(0f)]
 	float innerFalloffRadius = 1f, innerRadius = 5f;
@@ -19,7 +29,8 @@ public class GravitySphere : GravitySource {
 		if (distance > outerFalloffRadius || distance < innerFalloffRadius) {
 			return Vector3.zero;
 		}
-		float g = gravity / distance;
+		float d = Mathf.Max(distance, 0.0001f);
+		float g = gravity / d;
 		if (distance > outerRadius) {
 			g *= 1f - (distance - outerRadius) * outerFalloffFactor;
 		}
@@ -39,8 +50,10 @@ public class GravitySphere : GravitySource {
 		outerRadius = Mathf.Max(outerRadius, innerRadius);
 		outerFalloffRadius = Mathf.Max(outerFalloffRadius, outerRadius);
 
-		innerFalloffFactor = 1f / (innerRadius - innerFalloffRadius);
-		outerFalloffFactor = 1f / (outerFalloffRadius - outerRadius);
+		innerFalloffFactor = innerRadius > innerFalloffRadius
+			? 1f / (innerRadius - innerFalloffRadius) : 0f;
+		outerFalloffFactor = outerFalloffRadius > outerRadius
+			? 1f / (outerFalloffRadius - outerRadius) : 0f;
 	}
 
 	void OnDrawGizmos () {

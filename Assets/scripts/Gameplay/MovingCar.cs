@@ -641,7 +641,8 @@ public class MovingCar : NetworkBehaviour {
 			return;
 		}
 
-		gravity = gravityCar.UpdateAndApplyGravity();
+		Vector3? groundNormal = (contactNormal.sqrMagnitude > 0.001f && !_jumpActive) ? contactNormal.normalized : (Vector3?)null;
+		gravity = gravityCar.UpdateAndApplyGravity(groundNormal);
 		upAxis  = gravityCar.UpAxis;
 
 		stepsSinceLastGrounded += 1;
@@ -1011,7 +1012,8 @@ public class MovingCar : NetworkBehaviour {
 		if (Vector3.Dot(velocity, upAxis) > 0.1f) return false;
 		if (velocity.magnitude > maxSnapSpeed) return false;
 		if (!Physics.Raycast(body.position, -upAxis, out RaycastHit hit, probeDistance, probeMask)) return false;
-		if (Vector3.Dot(upAxis, hit.normal) < minGroundDot) return false;
+		Vector3 localUp = CustomGravity.GetUpAxis(hit.point);
+		if (Vector3.Dot(upAxis, hit.normal) < minGroundDot && Vector3.Dot(localUp, hit.normal) < minGroundDot) return false;
 
 		groundContactCount = 1;
 		contactNormal      = hit.normal;
@@ -1074,7 +1076,9 @@ public class MovingCar : NetworkBehaviour {
 		for (int i = 0; i < collision.contactCount; i++) {
 			ContactPoint contact = collision.GetContact(i);
 			Vector3 normal = contact.normal;
-			if (Vector3.Dot(gravityCar.UpAxis, normal) >= minGroundDot) {
+			Vector3 localUp = CustomGravity.GetUpAxis(contact.point);
+			if (Vector3.Dot(gravityCar.UpAxis, normal) >= minGroundDot ||
+			    Vector3.Dot(localUp, normal) >= minGroundDot) {
 				groundContactCount += 1;
 				contactNormal      += normal;
 				if (!sampled) {

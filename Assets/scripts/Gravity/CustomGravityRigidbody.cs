@@ -66,11 +66,25 @@ public class CustomGravityRigidbody : MonoBehaviour {
 	// Uses the same incremental slerp pattern as GravityCar so alignment speed
 	// is frame-rate independent and works at any gravity transition rate.
 	void AlignToUp (Vector3 upAxis) {
+		if (upAxis.sqrMagnitude < 0.001f) return;
 		Vector3 fromUp  = gravityAlignment * Vector3.up;
 		float dot       = Mathf.Clamp(Vector3.Dot(fromUp, upAxis), -1f, 1f);
 		float angle     = Mathf.Acos(dot) * Mathf.Rad2Deg;
 		float maxAngle  = alignmentSpeed * Time.fixedDeltaTime;
-		Quaternion target = Quaternion.FromToRotation(fromUp, upAxis) * gravityAlignment;
+
+		Quaternion target;
+		if (dot < -0.999f) {
+			Vector3 flipAxis = Vector3.Cross(fromUp, transform.forward);
+			if (flipAxis.sqrMagnitude < 0.001f) flipAxis = Vector3.Cross(fromUp, transform.right);
+			if (flipAxis.sqrMagnitude < 0.001f) flipAxis = transform.right;
+			flipAxis.Normalize();
+			target = Quaternion.AngleAxis(180f, flipAxis) * gravityAlignment;
+		} else {
+			target = Quaternion.FromToRotation(fromUp, upAxis) * gravityAlignment;
+		}
+
+		if (float.IsNaN(target.x) || float.IsNaN(target.y) || float.IsNaN(target.z) || float.IsNaN(target.w)) return;
+
 		gravityAlignment  = angle <= maxAngle
 			? target
 			: Quaternion.SlerpUnclamped(gravityAlignment, target, maxAngle / angle);

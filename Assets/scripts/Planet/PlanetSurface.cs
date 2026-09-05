@@ -1,5 +1,9 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
+using RollingSkys.Performance;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -52,6 +56,8 @@ public class PlanetSurface : MonoBehaviour
     Color[]   _colors;
     Vector3[] _cachedVertices;
     int[]     _cachedTriangles;
+    NativeArray<float3> _nativeVertices;
+    NativeArray<int>    _burstResult;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Unity lifecycle
@@ -61,6 +67,12 @@ public class PlanetSurface : MonoBehaviour
     {
         Init();
         PushMaterialProperties();
+    }
+
+    void OnDestroy()
+    {
+        if (_nativeVertices.IsCreated) _nativeVertices.Dispose();
+        if (_burstResult.IsCreated) _burstResult.Dispose();
     }
 
 #if UNITY_EDITOR
@@ -91,7 +103,23 @@ public class PlanetSurface : MonoBehaviour
 
         int vcount = _mesh.vertexCount;
         if (_cachedVertices == null || _cachedVertices.Length != vcount)
+        {
             _cachedVertices = _mesh.vertices;
+            if (_nativeVertices.IsCreated) _nativeVertices.Dispose();
+            _nativeVertices = new NativeArray<float3>(vcount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < vcount; i++)
+                _nativeVertices[i] = _cachedVertices[i];
+        }
+        else if (!_nativeVertices.IsCreated || _nativeVertices.Length != vcount)
+        {
+            if (_nativeVertices.IsCreated) _nativeVertices.Dispose();
+            _nativeVertices = new NativeArray<float3>(vcount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < vcount; i++)
+                _nativeVertices[i] = _cachedVertices[i];
+        }
+
+        if (!_burstResult.IsCreated)
+            _burstResult = new NativeArray<int>(1, Allocator.Persistent);
 
         if (_cachedTriangles == null)
             _cachedTriangles = _mesh.triangles;
@@ -233,13 +261,26 @@ public class PlanetSurface : MonoBehaviour
 
         Vector3 localPoint = transform.InverseTransformPoint(worldPoint);
         int   bestIdx  = 0;
-        float bestDist = float.MaxValue;
-        int   count    = _cachedVertices.Length;
 
-        for (int i = 0; i < count; i++)
+        if (_nativeVertices.IsCreated && _nativeVertices.Length == _cachedVertices.Length)
         {
-            float d = (_cachedVertices[i] - localPoint).sqrMagnitude;
-            if (d < bestDist) { bestDist = d; bestIdx = i; }
+            new FindNearestVertexBurstJob
+            {
+                Vertices = _nativeVertices,
+                LocalPoint = (float3)localPoint,
+                ResultIndex = _burstResult
+            }.Run();
+            bestIdx = _burstResult[0];
+        }
+        else
+        {
+            float bestDist = float.MaxValue;
+            int   count    = _cachedVertices.Length;
+            for (int i = 0; i < count; i++)
+            {
+                float d = (_cachedVertices[i] - localPoint).sqrMagnitude;
+                if (d < bestDist) { bestDist = d; bestIdx = i; }
+            }
         }
 
         if (bestIdx < 0 || bestIdx >= _colors.Length) return null;
