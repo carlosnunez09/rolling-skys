@@ -191,7 +191,22 @@ public class MovingCar : NetworkBehaviour {
 
 	// ── Jump ──────────────────────────────────────────────────────────
 
-	[BoxGroup("Jump"), SerializeField, Range(0f, 10f)]
+	[BoxGroup("Jump"), SerializeField, Range(0.5f, 5f), Label("Min Jump Height  m")]
+	float minJumpHeight = 1.2f;
+
+	[BoxGroup("Jump"), SerializeField, Range(1f, 10f), Label("Max Jump Height  m")]
+	float maxJumpHeight = 3.8f;
+
+	[BoxGroup("Jump"), SerializeField, Range(0.1f, 0.6f), Label("Max Jump Hold Duration  s")]
+	float maxJumpHoldDuration = 0.25f;
+
+	[BoxGroup("Jump"), SerializeField, Range(0.05f, 0.5f), Label("Jump Cooldown  s")]
+	float jumpCooldown = 0.2f;
+
+	[BoxGroup("Jump"), SerializeField, Range(0.05f, 0.3f), Label("Jump Buffer Duration  s")]
+	float jumpBufferDuration = 0.15f;
+
+	[SerializeField, HideInInspector]
 	float jumpHeight = 2f;
 
 	// ── Ground Detection ──────────────────────────────────────────────
@@ -278,6 +293,8 @@ public class MovingCar : NetworkBehaviour {
 	public bool  IsDrifting      => statDrifting;
 	public float DriftDirection  => _driftDirection;
 	public float DriftAngle      => _driftAngle;
+	public bool  IsJumping       => _jumpActive;
+	public float JumpHeight      => maxJumpHeight;
 	public bool  MiniTurboReady  => _miniTurboReady;
 	public float MiniTurboChargeRatio => miniTurboChargeTime > 0f ? Mathf.Clamp01(_driftChargeTimer / miniTurboChargeTime) : 0f;
 	public string SurfaceName    => _currentSurfaceName;
@@ -323,6 +340,10 @@ public class MovingCar : NetworkBehaviour {
 	int groundContactCount;
 	int stepsSinceLastGrounded, stepsSinceLastJump;
 	bool desiredJump;
+	bool  _jumpActive;
+	float _jumpHoldTimer;
+	float _jumpCooldownTimer;
+	float _jumpBufferTimer;
 
 	float prevSpeed;
 	float prevYawVelocity;
@@ -399,12 +420,16 @@ public class MovingCar : NetworkBehaviour {
 	// Pre-allocated list for alpha-only colour updates (no topology change).
 	readonly List<Color> _skidAlphaBuffer = new List<Color>();
 
-	bool OnGround => groundContactCount > 0;
+	bool OnGround => groundContactCount > 0 && !_jumpActive && stepsSinceLastJump >= 8;
 
 	InputAction moveAction, jumpAction, driftAction;
 
 	void OnValidate () {
 		minGroundDot = Mathf.Cos(maxGroundAngle * Mathf.Deg2Rad);
+		if (jumpHeight > 0f && maxJumpHeight == 3.8f && jumpHeight != 2f) {
+			maxJumpHeight = jumpHeight;
+			minJumpHeight = Mathf.Max(jumpHeight * 0.35f, 0.8f);
+		}
 		if (Application.isPlaying)
 			ApplyOfflineSceneTestState();
 	}
@@ -551,6 +576,7 @@ public class MovingCar : NetworkBehaviour {
 			// Clear any queued jump so a press before lockout doesn't fire
 			// the moment input is re-enabled (e.g. race countdown locking input).
 			desiredJump = false;
+			_jumpBufferTimer = 0f;
 		}
 	}
 
@@ -580,10 +606,14 @@ public class MovingCar : NetworkBehaviour {
 
 	void Update () {
 #if !UNITY_SERVER || UNITY_EDITOR
-		if (HasLocalControl)
-			desiredJump |= jumpAction.WasPressedThisFrame();
-		else
+		if (HasLocalControl) {
+			if (jumpAction.WasPressedThisFrame()) {
+				_jumpBufferTimer = jumpBufferDuration;
+				desiredJump = true;
+			}
+		} else {
 			UpdateRemoteSkidMarks(Time.deltaTime);
+		}
 
 		UpdateSkidAlpha();
 #endif
@@ -618,6 +648,14 @@ public class MovingCar : NetworkBehaviour {
 		stepsSinceLastJump     += 1;
 		velocity = body.linearVelocity;
 
+		if (_jumpBufferTimer > 0f) {
+			_jumpBufferTimer -= Time.fixedDeltaTime;
+			if (_jumpBufferTimer <= 0f) desiredJump = false;
+		}
+		if (_jumpCooldownTimer > 0f) {
+			_jumpCooldownTimer -= Time.fixedDeltaTime;
+		}
+
 		UpdateState(upAxis);
 
 		// Landing — spike slip proportional to spin speed at impact, reset airborne attitude
@@ -626,6 +664,8 @@ public class MovingCar : NetworkBehaviour {
 			landingSlip = Mathf.Clamp01(Mathf.Abs(yawVelocity) / maxSlipYawRate);
 			_airPitch = 0f;
 			_airRoll  = 0f;
+			_jumpActive = false;
+			_jumpCooldownTimer = jumpCooldown;
 		}
 		wasGrounded = OnGround;
 		landingSlip = Mathf.MoveTowards(landingSlip, 0f, slipRecoveryRate * Time.fixedDeltaTime);
@@ -827,14 +867,38 @@ public class MovingCar : NetworkBehaviour {
 			body.MoveRotation(airRotation);
 		}
 
-		// Hop
-		if (desiredJump && OnGround) {
-			desiredJump    = false;
+		// ── Jump & Variable Height Sustain ────────────────────────────────
+		bool canJump = OnGround && !_jumpActive && _jumpCooldownTimer <= 0f && stepsSinceLastJump > 8;
+		if (desiredJump && canJump) {
+			desiredJump        = false;
+			_jumpBufferTimer   = 0f;
+			_jumpActive        = true;
+			_jumpHoldTimer     = 0f;
 			stepsSinceLastJump = 0;
-			float jumpSpeed    = Mathf.Sqrt(2f * gravity.magnitude * jumpHeight);
+
+			float gMag         = gravity.magnitude;
+			float launchSpeed  = Mathf.Sqrt(2f * gMag * minJumpHeight);
 			float alignedSpeed = Vector3.Dot(velocity, upAxis);
-			if (alignedSpeed > 0f) jumpSpeed = Mathf.Max(jumpSpeed - alignedSpeed, 0f);
-			body.linearVelocity += upAxis * jumpSpeed;
+			if (alignedSpeed > 0f)
+				launchSpeed = Mathf.Max(launchSpeed - alignedSpeed * 0.5f, launchSpeed * 0.4f);
+			body.linearVelocity += upAxis * launchSpeed;
+		}
+
+		// Variable jump sustain while holding Space during ascent
+		if (_jumpActive) {
+			_jumpHoldTimer += Time.fixedDeltaTime;
+			float vertSpeed   = Vector3.Dot(body.linearVelocity, upAxis);
+			bool  holdingJump = jumpAction != null && jumpAction.IsPressed();
+
+			if (holdingJump && _jumpHoldTimer < maxJumpHoldDuration && vertSpeed > 0.2f) {
+				float gMag         = gravity.magnitude;
+				float targetDeltaV = Mathf.Max(Mathf.Sqrt(2f * gMag * maxJumpHeight) - Mathf.Sqrt(2f * gMag * minJumpHeight), 0f);
+				float sustainAccel = maxJumpHoldDuration > 0f ? (targetDeltaV / maxJumpHoldDuration) : 0f;
+				body.AddForce(upAxis * sustainAccel, ForceMode.Acceleration);
+			} else {
+				// Space was released early, hold duration expired, or apex reached — sustain ends
+				_jumpActive = false;
+			}
 		}
 
 		// Re-read velocity AFTER all physics ops
@@ -942,7 +1006,9 @@ public class MovingCar : NetworkBehaviour {
 	}
 
 	bool SnapToGround (Vector3 upAxis) {
-		if (stepsSinceLastGrounded > 4 || stepsSinceLastJump <= 2) return false;
+		if (_jumpActive || stepsSinceLastJump < 25) return false;
+		if (stepsSinceLastGrounded > 4) return false;
+		if (Vector3.Dot(velocity, upAxis) > 0.1f) return false;
 		if (velocity.magnitude > maxSnapSpeed) return false;
 		if (!Physics.Raycast(body.position, -upAxis, out RaycastHit hit, probeDistance, probeMask)) return false;
 		if (Vector3.Dot(upAxis, hit.normal) < minGroundDot) return false;
@@ -1003,6 +1069,7 @@ public class MovingCar : NetworkBehaviour {
 	}
 
 	void EvaluateCollision (Collision collision) {
+		if (_jumpActive && stepsSinceLastJump < 8) return;
 		bool sampled = false;
 		for (int i = 0; i < collision.contactCount; i++) {
 			ContactPoint contact = collision.GetContact(i);
