@@ -48,25 +48,31 @@ public class OrbitCamera : MonoBehaviour {
 	bool allowKeyToggle = true;
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Range(-90f, 90f), Label("Orbit Speed  °/s")]
-	float cinematicOrbitSpeed = 15f;
+	float cinematicOrbitSpeed = 6f;
 
-	[BoxGroup("Cinematic Orbit"), SerializeField, Range(2f, 50f), Label("Cinematic Distance  m")]
-	float cinematicDistance = 8.5f;
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Keep Driving Distance")]
+	bool matchDrivingDistance = true;
 
-	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 85f), Label("Base Pitch  °")]
-	float cinematicBasePitch = 18f;
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(2f, 50f), Label("Custom Distance  m")]
+	float cinematicDistance = 15f;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Keep Driving Pitch")]
+	bool matchDrivingPitch = true;
+
+	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 85f), Label("Custom Pitch  °")]
+	float cinematicBasePitch = 22f;
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 30f), Label("Pitch Wave Amp  °")]
-	float cinematicPitchWaveAmp = 6f;
+	float cinematicPitchWaveAmp = 0f;
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0.02f, 2f), Label("Wave Frequency  Hz")]
 	float cinematicWaveFrequency = 0.2f;
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0f, 10f), Label("Distance Breath Amp  m")]
-	float cinematicDistanceBreath = 1.0f;
+	float cinematicDistanceBreath = 0f;
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Range(0.5f, 10f), Label("Transition Speed")]
-	float cinematicTransitionSpeed = 2.5f;
+	float cinematicTransitionSpeed = 1.5f;
 
 	// ── Rotation ──────────────────────────────────────────────────────
 
@@ -210,16 +216,11 @@ public class OrbitCamera : MonoBehaviour {
 
 		if (ManualRotation()) {
 			ConstrainAngles();
-		} else if (_cinematicWeight > 0.95f) {
+		} else if (IsCinematicActive || _cinematicWeight > 0.01f) {
 			orbitAngles.y += cinematicOrbitSpeed * Time.deltaTime;
 			ConstrainAngles();
-		} else {
-			if (AutomaticRotation())
-				ConstrainAngles();
-			if (_cinematicWeight > 0.001f) {
-				orbitAngles.y += cinematicOrbitSpeed * _cinematicWeight * Time.deltaTime;
-				ConstrainAngles();
-			}
+		} else if (AutomaticRotation()) {
+			ConstrainAngles();
 		}
 
 		UpdatePitch();
@@ -372,9 +373,12 @@ public class OrbitCamera : MonoBehaviour {
 		_cinematicWeight = Mathf.MoveTowards(_cinematicWeight, active ? 1f : 0f, cinematicTransitionSpeed * Time.deltaTime);
 
 		if (_cinematicWeight > 0.001f) {
-			_cinematicWaveTimer += Time.deltaTime;
-			float distBreath = Mathf.Cos(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicDistanceBreath;
-			_cinematicTargetDistance = cinematicDistance + distBreath;
+			float targetDist = matchDrivingDistance ? distance : cinematicDistance;
+			if (cinematicDistanceBreath > 0f) {
+				_cinematicWaveTimer += Time.deltaTime;
+				targetDist += Mathf.Cos(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicDistanceBreath;
+			}
+			_cinematicTargetDistance = targetDist;
 		} else {
 			_cinematicTargetDistance = distance;
 		}
@@ -401,10 +405,13 @@ public class OrbitCamera : MonoBehaviour {
 		float t           = Mathf.Clamp01(smoothedSpeed / speedForFullAngle);
 		float drivingPitch = Mathf.Lerp(topDownAngle, behindAngle, t);
 
-		if (_cinematicWeight > 0.001f) {
-			float wavePitch = cinematicBasePitch + Mathf.Sin(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicPitchWaveAmp;
-			float targetPitch = Mathf.Lerp(drivingPitch, wavePitch, _cinematicWeight);
-			orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetPitch, pitchSmoothSpeed * Time.deltaTime);
+		if (_cinematicWeight > 0.001f && !matchDrivingPitch) {
+			float targetPitch = cinematicBasePitch;
+			if (cinematicPitchWaveAmp > 0f) {
+				targetPitch += Mathf.Sin(_cinematicWaveTimer * cinematicWaveFrequency * Mathf.PI * 2f) * cinematicPitchWaveAmp;
+			}
+			float blendedPitch = Mathf.Lerp(drivingPitch, targetPitch, _cinematicWeight);
+			orbitAngles.x = Mathf.Lerp(orbitAngles.x, blendedPitch, pitchSmoothSpeed * Time.deltaTime);
 		} else {
 			orbitAngles.x = Mathf.Lerp(orbitAngles.x, drivingPitch, pitchSmoothSpeed * Time.deltaTime);
 		}

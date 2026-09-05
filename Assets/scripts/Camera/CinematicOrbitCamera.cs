@@ -39,22 +39,22 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	// ── Orbit Dynamics ─────────────────────────────────────────────────
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(-90f, 90f), Label("Orbit Speed  °/s")]
-	float orbitSpeed = 16f;
+	float orbitSpeed = 6f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(2f, 50f), Label("Distance  m")]
-	float distance = 8.5f;
+	float distance = 15f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(0f, 85f), Label("Base Elevation  °")]
-	float baseElevationAngle = 18f;
+	float baseElevationAngle = 20f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(0f, 30f), Label("Elevation Wave Amp  °")]
-	float elevationWaveAmplitude = 7f;
+	float elevationWaveAmplitude = 0f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(0.02f, 2f), Label("Elevation Wave Freq  Hz")]
 	float elevationWaveFrequency = 0.18f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(0f, 10f), Label("Distance Breath Amp  m")]
-	float distanceBreathAmplitude = 1.0f;
+	float distanceBreathAmplitude = 0f;
 
 	[BoxGroup("Orbit Dynamics"), SerializeField, Range(0.02f, 2f), Label("Distance Breath Freq  Hz")]
 	float distanceBreathFrequency = 0.12f;
@@ -212,18 +212,27 @@ public class CinematicOrbitCamera : MonoBehaviour {
 
 	void UpdateOrbitMovement () {
 		if (!isPaused) {
-			// Continuous panoramic orbit
+			// Continuous panoramic orbit at slow, calm speed
 			orbitAngles.y += orbitSpeed * Time.deltaTime;
 			if (orbitAngles.y >= 360f) orbitAngles.y -= 360f;
 			else if (orbitAngles.y < 0f) orbitAngles.y += 360f;
 
-			// Elevation & distance breathing waves
-			waveTimer += Time.deltaTime;
-			float targetElevation = baseElevationAngle + Mathf.Sin(waveTimer * elevationWaveFrequency * Mathf.PI * 2f) * elevationWaveAmplitude;
-			orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetElevation, 4f * Time.deltaTime);
+			// Optional elevation wave (only if amplitude > 0)
+			if (elevationWaveAmplitude > 0f) {
+				waveTimer += Time.deltaTime;
+				float targetElevation = baseElevationAngle + Mathf.Sin(waveTimer * elevationWaveFrequency * Mathf.PI * 2f) * elevationWaveAmplitude;
+				orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetElevation, 4f * Time.deltaTime);
+			} else {
+				orbitAngles.x = baseElevationAngle;
+			}
 
-			float targetDist = distance + Mathf.Cos(waveTimer * distanceBreathFrequency * Mathf.PI * 2f) * distanceBreathAmplitude;
-			currentDistance = Mathf.Lerp(currentDistance, targetDist, 3f * Time.deltaTime);
+			// Optional distance breathing (only if amplitude > 0)
+			if (distanceBreathAmplitude > 0f) {
+				float targetDist = distance + Mathf.Cos(waveTimer * distanceBreathFrequency * Mathf.PI * 2f) * distanceBreathAmplitude;
+				currentDistance = Mathf.Lerp(currentDistance, targetDist, 3f * Time.deltaTime);
+			} else {
+				currentDistance = distance;
+			}
 		}
 
 		// Optional interactive look / zoom override
