@@ -349,7 +349,11 @@ public class CarHUD : MonoBehaviour {
         Set(landingSlipText,  $"Slip  {car.LandingSlip * 100f:F0}%");
         string driftLabel = "—";
         if (car.IsDrifting) {
-            driftLabel = car.MiniTurboReady ? "TURBO READY!" : $"DRIFT {car.MiniTurboChargeRatio * 100f:F0}%";
+            if (car.DriftDirection != 0f) {
+                driftLabel = car.MiniTurboReady ? "TURBO READY!" : $"DRIFT {car.MiniTurboChargeRatio * 100f:F0}%";
+            } else {
+                driftLabel = "SLIP";
+            }
         }
         Set(driftingText, driftLabel);
 

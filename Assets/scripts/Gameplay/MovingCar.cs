@@ -276,6 +276,7 @@ public class MovingCar : NetworkBehaviour {
 	public float YawAcceleration => statYawAcceleration;
 	public bool  IsGrounded      => statGrounded;
 	public bool  IsDrifting      => statDrifting;
+	public float DriftDirection  => _driftDirection;
 	public float DriftAngle      => _driftAngle;
 	public bool  MiniTurboReady  => _miniTurboReady;
 	public float MiniTurboChargeRatio => miniTurboChargeTime > 0f ? Mathf.Clamp01(_driftChargeTimer / miniTurboChargeTime) : 0f;
@@ -664,17 +665,21 @@ public class MovingCar : NetworkBehaviour {
 			}
 
 			// ── Drift State, Counter-Steering & Mini-Turbo ────────────────────
+			// When holding drift without steering, car enters neutral slip-and-slide
+			// preserving forward linear momentum. Only lock in a directional power slide
+			// if the player actively steers (or already has substantial lateral skid).
 			if (isDrifting && absSpeed > 2.5f) {
 				if (_driftDirection == 0f) {
-					if (Mathf.Abs(steer) > 0.1f)
+					if (Mathf.Abs(steer) > 0.15f) {
 						_driftDirection = Mathf.Sign(steer);
-					else if (Mathf.Abs(Vector3.Dot(velocity, right)) > 0.3f)
-						_driftDirection = Mathf.Sign(Vector3.Dot(velocity, right));
-					else
-						_driftDirection = 1f;
+					} else {
+						float latVel = Vector3.Dot(velocity, right);
+						if (Mathf.Abs(latVel) > 2.0f)
+							_driftDirection = Mathf.Sign(latVel);
+					}
 				}
 			} else if (!isDrifting || absSpeed < 1.5f) {
-				// Mini-turbo burst upon exiting a sustained drift!
+				// Mini-turbo burst upon exiting a sustained directional drift!
 				if (_miniTurboReady && OnGround && absSpeed > 2f) {
 					body.AddForce(forward * miniTurboImpulse, ForceMode.VelocityChange);
 				}
@@ -697,14 +702,15 @@ public class MovingCar : NetworkBehaviour {
 			_driftAngle = Mathf.MoveTowards(_driftAngle, targetDriftAngle, driftAngleRate * 10f * Time.fixedDeltaTime);
 
 			// ── Steering with Rotational Inertia ──────────────────────────────
-			float yawBoost = isDrifting ? driftYawMultiplier : 1f;
+			// Yaw multiplier only engages when in active directional drift; neutral slide preserves straight steering
+			float yawBoost = (_driftDirection != 0f) ? driftYawMultiplier : 1f;
 			float rawSteeringYaw    = steer * (absSpeed / minTurningRadius) * Mathf.Rad2Deg * reverseSign;
 			float yawRateCap        = (maxSpeed / minTurningRadius) * Mathf.Rad2Deg * (isDrifting ? 1.35f : 1f);
 			float targetSteeringYaw = Mathf.Clamp(rawSteeringYaw * yawBoost, -yawRateCap, yawRateCap);
 
 			if (_driftDirection != 0f && Mathf.Abs(steer) < 0.1f) {
-				// Gentle self-steer along the drift curve when releasing the stick
-				targetSteeringYaw = _driftDirection * (yawRateCap * 0.45f);
+				// Gentle self-steer along the drift curve when releasing the stick during directional drift
+				targetSteeringYaw = _driftDirection * (yawRateCap * 0.35f);
 			}
 
 			float steerRate = yawInertiaSmoothRate * 20f;
@@ -754,7 +760,8 @@ public class MovingCar : NetworkBehaviour {
 				}
 
 			} else {
-				float rawCoastForce  = -fwdSpeed * coastDeceleration * _groundFriction;
+				float coastDecel     = isDrifting ? coastDeceleration * 0.25f : coastDeceleration;
+				float rawCoastForce  = -fwdSpeed * coastDecel * _groundFriction;
 				float coastForceCap  = brakeForce * 0.25f * _groundFriction;
 				body.AddForce(forward * Mathf.Clamp(rawCoastForce, -coastForceCap, coastForceCap), ForceMode.Acceleration);
 			}
@@ -769,11 +776,12 @@ public class MovingCar : NetworkBehaviour {
 			body.AddForce(-right * lateralSpeed * effectiveGrip, ForceMode.VelocityChange);
 
 			// ── Drift Speed Cap ───────────────────────────────────────────────
-			if (isDrifting) {
+			// In neutral slip, preserve linear momentum without capping; in directional drift cap to top speed.
+			if (isDrifting && _driftDirection != 0f) {
 				Vector3 surfaceVel   = Vector3.ProjectOnPlane(body.linearVelocity, upAxis);
 				float   surfaceSpeed = surfaceVel.magnitude;
-				if (surfaceSpeed > effectiveMaxSpeed) {
-					body.AddForce(-surfaceVel.normalized * (surfaceSpeed - effectiveMaxSpeed), ForceMode.VelocityChange);
+				if (surfaceSpeed > effectiveTopSpeed) {
+					body.AddForce(-surfaceVel.normalized * (surfaceSpeed - effectiveTopSpeed), ForceMode.VelocityChange);
 				}
 			}
 
@@ -834,7 +842,7 @@ public class MovingCar : NetworkBehaviour {
 		float finalFwdSpeed = Vector3.Dot(postVel, forward);
 		float finalLatSpeed = Vector3.Dot(postVel, right);
 		UpdateStats(gravity, isDrifting, finalFwdSpeed, finalLatSpeed, postVel.magnitude);
-		UpdateSkidMarks(upAxis, isDrifting, finalLatSpeed);
+		UpdateSkidMarks(upAxis, isDrifting, finalLatSpeed, false, finalFwdSpeed);
 		ClearState();
 	}
 
@@ -1064,13 +1072,14 @@ public class MovingCar : NetworkBehaviour {
 		statGrounded = remoteGrounded;
 		statDrifting = _networkDrifting.Value && remoteGrounded;
 
-		UpdateSkidMarks(upAxis, _networkDrifting.Value, lateralSpeed, remoteGrounded);
+		UpdateSkidMarks(upAxis, _networkDrifting.Value, lateralSpeed, remoteGrounded, forwardSpeed);
 	}
 
-	void UpdateSkidMarks (Vector3 upAxis, bool isDrifting, float lateralSpeed, bool groundOverride = false) {
+	void UpdateSkidMarks (Vector3 upAxis, bool isDrifting, float lateralSpeed, bool groundOverride = false, float forwardSpeed = 0f) {
 		float now        = Time.time;
 		bool  isGrounded = groundOverride || OnGround;
-		bool  shouldMark = isGrounded && isDrifting && Mathf.Abs(lateralSpeed) >= minSkidLateralSpeed;
+		bool  isSlipping = Mathf.Abs(lateralSpeed) >= minSkidLateralSpeed || (isDrifting && Mathf.Abs(forwardSpeed) >= 4f);
+		bool  shouldMark = isGrounded && isDrifting && isSlipping;
 		Vector3 carRight = transform.right;
 
 		for (int w = 0; w < 2; w++) {
