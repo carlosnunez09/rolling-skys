@@ -195,7 +195,7 @@ public class OrbitCamera : MonoBehaviour {
 		var cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
 
 		foreach (MovingCar car in cars) {
-			if (car != null && car.IsSpawned && car.IsOwner) {
+			if (car != null && car.HasLocalControl) {
 				SetFocus(car.transform);
 				return;
 			}

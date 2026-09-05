@@ -208,6 +208,8 @@ public class CarHUD : MonoBehaviour {
 
     static bool IsBindableCar (MovingCar candidate) {
         if (candidate == null || !candidate.isActiveAndEnabled) return false;
+        if (candidate.HasLocalControl) return true;
+        if (MovingCar.AnyOfflineSceneTestCarActive()) return false;
         if (candidate.IsSpawned) return candidate.IsOwner;
 
         NetworkManager networkManager = NetworkManager.Singleton;
@@ -345,36 +347,35 @@ public class CarHUD : MonoBehaviour {
         Set(yawRateText,      $"Turn  {car.YawRate:+0.0;-0.0} °/s");
         Set(lateralSpeedText, $"Lat  {car.LateralSpeed:F2} m/s");
         Set(landingSlipText,  $"Slip  {car.LandingSlip * 100f:F0}%");
-        Set(driftingText,     car.IsDrifting ? "DRIFT" : "—");
+        string driftLabel = "—";
+        if (car.IsDrifting) {
+            driftLabel = car.MiniTurboReady ? "TURBO READY!" : $"DRIFT {car.MiniTurboChargeRatio * 100f:F0}%";
+        }
+        Set(driftingText, driftLabel);
 
         if (turnRateBar != null)
-            turnRateBar.value = maxYawForBar > 0f
-                ? Mathf.Clamp01(absYaw / maxYawForBar)
-                : 0f;
+            turnRateBar.value = Mathf.Clamp01(absYaw / maxYawForBar);
     }
 
-    // ── World ─────────────────────────────────────────────────────────
+    // ── World / Gravity ───────────────────────────────────────────────
 
     void UpdateWorld () {
         Set(gravitySourceText,   car.GravitySource);
-        Set(gravityStrengthText, $"G  {car.GravityStrength:F2} m/s²");
+        Set(gravityStrengthText, $"{car.GravityStrength:F2} m/s²");
         Set(groundedText,        car.IsGrounded ? "Grounded" : "Airborne");
-        Set(groundAngleText,     $"Angle  {car.GroundAngle:F1}°");
+        Set(groundAngleText,     $"{car.GroundAngle:F1}°");
     }
 
     // ── Race Panel ────────────────────────────────────────────────────
 
     void UpdateRacePanel () {
-        if (raceRuntime == null) return;
-
-        Set(trackNameText,  !string.IsNullOrEmpty(raceRuntime.ActiveTrackName) ? raceRuntime.ActiveTrackName : "—");
-        // Planet name removed — a track can span multiple planets.
+        if (raceRuntime != null)
+            Set(trackNameText, !string.IsNullOrEmpty(raceRuntime.ActiveTrackName) ? raceRuntime.ActiveTrackName : "—");
 
         var player = PlayerRacerState();
         if (player == null) return;
 
-        int totalLaps = raceRuntime.Racers.Count > 0 ? 1 : 1; // placeholder; lap total lives in RaceRuntime
-        Set(lapText,        $"Lap  {player.LapCount + 1}");
+        Set(lapText,        $"Lap {player.LapCount}");
         Set(checkpointText, $"CP  {player.CheckpointsCrossed}");
         Set(raceTimeText,   FormatTime(player.RaceTime));
         Set(positionText,   Ordinal(player.Position));
@@ -403,13 +404,20 @@ public class CarHUD : MonoBehaviour {
             $"  Fwd           {fwdKmh:+0.0;-0.0} km/h\n" +
             $"  Lateral       {car.LateralSpeed:F2} m/s\n" +
             $"  Accel         {car.Acceleration:+0.0;-0.0} m/s²\n" +
+            $"  Downforce     {car.Downforce:F1} m/s²\n" +
             $"  Torque        {torque:F0}%  |  RPM {rpm:F0}\n" +
-            $"\n<b>HANDLING</b>\n" +
+            $"\n<b>HANDLING & DRIFT</b>\n" +
             $"  State         {state}\n" +
             $"  Turn Rate     {car.YawRate:+0.0;-0.0}°/s\n" +
             $"  Heading       {heading:F0}°\n" +
+            $"  Drift Angle   {car.DriftAngle:+0.0;-0.0}°\n" +
+            $"  Mini-Turbo    {(car.MiniTurboReady ? "CHARGED!" : $"{car.MiniTurboChargeRatio * 100f:F0}%")}\n" +
             $"  Land Slip     {car.LandingSlip * 100f:F0}%\n" +
             $"  Grip          {car.GroundFriction * 100f:F0}%\n" +
+            $"\n<b>SURFACE</b>\n" +
+            $"  Name          {car.SurfaceName}\n" +
+            $"  Speed Mult    {car.SurfaceSpeedMultiplier * 100f:F0}%\n" +
+            $"  Hazard        {(car.IsOnHazard ? "DANGER" : "Safe")}\n" +
             $"\n<b>WORLD</b>\n" +
             $"  Ground Ang    {car.GroundAngle:F1}°\n" +
             $"  Gravity       {car.GravityStrength:F2} m/s²\n" +

@@ -45,8 +45,12 @@
 # JetBrains Rider/IntelliJ workspace
 .idea/
 
-# Claude Code memory
+# Claude Code / Codex memory
 .claude/
+.codex/
+
+# Local builds
+wbuilds/
 
 # Gradle cache directory
 .gradle/

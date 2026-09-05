@@ -8,6 +8,37 @@ using Unity.Netcode;
 [RequireComponent(typeof(GravityCar))]
 public class MovingCar : NetworkBehaviour {
 
+	[BoxGroup("Offline Test"), SerializeField, Label("Offline Scene Test")]
+	bool _offlineSceneTestMode;
+
+	public bool OfflineSceneTestMode {
+		get => _offlineSceneTestMode;
+		set {
+			_offlineSceneTestMode = value;
+			ApplyOfflineSceneTestState();
+		}
+	}
+
+	public bool OfflineSceneTestActive {
+		get {
+			if (!_offlineSceneTestMode || IsSpawned) return false;
+
+			NetworkManager networkManager = NetworkManager.Singleton;
+			return networkManager == null || !networkManager.IsListening;
+		}
+	}
+
+	public bool HasLocalControl => IsOwner || OfflineSceneTestActive;
+
+	public static bool AnyOfflineSceneTestCarActive () {
+		MovingCar[] cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
+		foreach (MovingCar car in cars)
+			if (car != null && car.OfflineSceneTestActive)
+				return true;
+
+		return false;
+	}
+
 	// ── Engine ────────────────────────────────────────────────────────
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 100f)]
@@ -57,6 +88,66 @@ public class MovingCar : NetworkBehaviour {
 	// How much faster the car rotates while drifting (oversteer boost)
 	[BoxGroup("Grip & Drift"), SerializeField, Range(1f, 4f)]
 	float driftYawMultiplier = 1.8f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(0f, 60f), Label("Max Drift Angle °")]
+	float maxDriftAngle = 36f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(1f, 30f), Label("Drift Angle Rate")]
+	float driftAngleRate = 8f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(0.1f, 2f), Label("Counter-Steer Authority")]
+	float counterSteerAuthority = 1.0f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(0f, 40f), Label("Mini-Turbo Impulse  m/s")]
+	float miniTurboImpulse = 11f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(0.3f, 3f), Label("Mini-Turbo Charge Time  s")]
+	float miniTurboChargeTime = 1.2f;
+
+	[BoxGroup("Grip & Drift"), SerializeField, Range(5f, 60f), Label("Yaw Inertia Smooth Rate")]
+	float yawInertiaSmoothRate = 22f;
+
+	// ── Surface Handling ──────────────────────────────────────────────
+
+	[BoxGroup("Surface Handling"), SerializeField, Range(0.1f, 1f), Label("Min Surface Speed Mult")]
+	float minSurfaceSpeedMultiplier = 0.35f;
+
+	[BoxGroup("Surface Handling"), SerializeField, Range(1f, 30f), Label("Surface Transition Speed")]
+	float surfaceTransitionSpeed = 8f;
+
+	// ── Downforce ─────────────────────────────────────────────────────
+
+	[BoxGroup("Downforce"), SerializeField, Range(0f, 150f), Label("Downforce Strength")]
+	float downforceStrength = 32f;
+
+	[BoxGroup("Downforce"), SerializeField, Range(0f, 60f), Label("Curvature Adhesion")]
+	float curvatureAdhesion = 18f;
+
+	[BoxGroup("Downforce"), SerializeField, Range(0.1f, 5f), Label("Min Adhesion Velocity  m/s")]
+	float minAdhesionVelocity = 0.5f;
+
+	// ── Air Control ───────────────────────────────────────────────────
+
+	[BoxGroup("Air Control"), SerializeField, Range(0f, 180f), Label("Air Pitch Speed  °/s")]
+	float airPitchSpeed = 80f;
+
+	[BoxGroup("Air Control"), SerializeField, Range(0f, 180f), Label("Air Yaw Speed  °/s")]
+	float airYawSpeed = 90f;
+
+	[BoxGroup("Air Control"), SerializeField, Range(0f, 180f), Label("Air Roll Speed  °/s")]
+	float airRollSpeed = 65f;
+
+	[BoxGroup("Air Control"), SerializeField, Range(0.5f, 15f), Label("Air Auto-Right Speed")]
+	float airAutoRightSpeed = 4.5f;
+
+	[BoxGroup("Air Control"), SerializeField, Range(0.5f, 20f), Label("Air Angular Damping")]
+	float airAngularDamping = 5f;
+
+	[BoxGroup("Air Control"), SerializeField, Label("Pre-Align To Landing")]
+	bool preAlignToLanding = true;
+
+	[BoxGroup("Air Control"), SerializeField, Range(1f, 12f), Label("Landing Probe Distance  m")]
+	float landingProbeDistance = 4.5f;
 
 	// ── Skid Marks ────────────────────────────────────────────────────
 
@@ -143,6 +234,21 @@ public class MovingCar : NetworkBehaviour {
 	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Drifting")]
 	bool statDrifting;
 
+	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Drift Angle  °")]
+	float statDriftAngle;
+
+	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Mini Turbo Ready")]
+	bool statMiniTurboReady;
+
+	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Surface Name")]
+	string statSurfaceName = "Default";
+
+	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Surface Speed Mult")]
+	float statSurfaceSpeedMultiplier = 1f;
+
+	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Downforce  m/s²")]
+	float statDownforce;
+
 	[BoxGroup("Stats"), SerializeField, ReadOnly, Label("Landing Slip  0–1")]
 	float statLandingSlip;
 
@@ -170,6 +276,14 @@ public class MovingCar : NetworkBehaviour {
 	public float YawAcceleration => statYawAcceleration;
 	public bool  IsGrounded      => statGrounded;
 	public bool  IsDrifting      => statDrifting;
+	public float DriftAngle      => _driftAngle;
+	public bool  MiniTurboReady  => _miniTurboReady;
+	public float MiniTurboChargeRatio => miniTurboChargeTime > 0f ? Mathf.Clamp01(_driftChargeTimer / miniTurboChargeTime) : 0f;
+	public string SurfaceName    => _currentSurfaceName;
+	public string SurfaceTag     => _currentSurfaceTag;
+	public float SurfaceSpeedMultiplier => _groundSpeedMultiplier;
+	public bool  IsOnHazard      => _isOnHazard;
+	public float Downforce       => _statDownforce;
 	public float LandingSlip     => statLandingSlip;
 	public float GroundAngle     => statGroundAngle;
 	public float GravityStrength => statGravityMagnitude;
@@ -219,11 +333,37 @@ public class MovingCar : NetworkBehaviour {
 	float _smoothYawRate;
 	float _smoothAccel;
 
-	// Surface friction — accumulated from SurfaceFriction components on contact objects.
-	// 1 = normal grip, 0 = frictionless ice.  Reset each physics step in ClearState.
-	float _groundFriction      = 1f;
-	float _groundFrictionSum   = 0f;
-	int   _groundFrictionCount = 0;
+	// Surface friction & speed multipliers — smoothly sampled from PlanetSurface & SurfaceFriction.
+	float _groundFriction         = 1f;
+	float _groundSpeedMultiplier  = 1f;
+	float _targetFriction         = 1f;
+	float _targetSpeedMultiplier  = 1f;
+	string _currentSurfaceName    = "Default";
+	string _currentSurfaceTag     = "";
+	bool   _isOnHazard;
+	float  _hazardDamagePerSecond;
+
+	// Accumulated per-step surface samples
+	int    _surfaceSampleCount;
+	float  _accumFriction;
+	float  _accumSpeedMultiplier;
+	float  _accumDamage;
+	int    _accumHazardCount;
+	string _lastSurfaceName;
+	string _lastSurfaceTag;
+
+	// Downforce state
+	float _statDownforce;
+
+	// Drift & mini-turbo state
+	float _driftAngle;
+	float _driftDirection;
+	float _driftChargeTimer;
+	bool  _miniTurboReady;
+
+	// Airborne attitude offsets
+	float _airPitch;
+	float _airRoll;
 
 	// ── Skid Mark State ───────────────────────────────────────────────
 
@@ -264,7 +404,15 @@ public class MovingCar : NetworkBehaviour {
 
 	void OnValidate () {
 		minGroundDot = Mathf.Cos(maxGroundAngle * Mathf.Deg2Rad);
+		if (Application.isPlaying)
+			ApplyOfflineSceneTestState();
 	}
+
+	[Button("Enable Offline Scene Test")]
+	void EnableOfflineSceneTest () => OfflineSceneTestMode = true;
+
+	[Button("Disable Offline Scene Test")]
+	void DisableOfflineSceneTest () => OfflineSceneTestMode = false;
 
 	void Awake () {
 		body = GetComponent<Rigidbody>();
@@ -312,10 +460,14 @@ public class MovingCar : NetworkBehaviour {
 #endif
 	}
 
+	void Start () {
+		ApplyOfflineSceneTestState();
+	}
+
 	public override void OnNetworkSpawn () {
 		ResetRemoteSkidTracking();
 
-		if (IsOwner) {
+		if (HasLocalControl) {
 #if !UNITY_SERVER || UNITY_EDITOR
 			body.isKinematic = false;
 			SetInputEnabled(true);
@@ -342,6 +494,21 @@ public class MovingCar : NetworkBehaviour {
 
 	/// <summary>True while a BoostPad is driving this car along a fixed arc.</summary>
 	public bool IsTrajectoryLocked => _trajectoryLocked;
+
+	void ApplyOfflineSceneTestState () {
+		if (!OfflineSceneTestActive) return;
+
+		if (body == null)
+			body = GetComponent<Rigidbody>();
+
+		body.isKinematic = false;
+		SetInputEnabled(true);
+
+#if !UNITY_SERVER || UNITY_EDITOR
+		RaceRuntime raceRuntime = FindAnyObjectByType<RaceRuntime>();
+		raceRuntime?.SetPlayerCar(this);
+#endif
+	}
 
 	/// <summary>
 	/// Lock or unlock scripted-trajectory mode (used by BoostPad).
@@ -400,7 +567,8 @@ public class MovingCar : NetworkBehaviour {
 		driftAction?.Disable();
 	}
 
-	void OnDestroy () {
+	public override void OnDestroy () {
+		base.OnDestroy();
 		if (_skidGo != null)       Destroy(_skidGo);
 		if (skidMesh != null)      Destroy(skidMesh);
 		if (_skidFallbackMat != null) Destroy(_skidFallbackMat);
@@ -411,7 +579,7 @@ public class MovingCar : NetworkBehaviour {
 
 	void Update () {
 #if !UNITY_SERVER || UNITY_EDITOR
-		if (IsOwner)
+		if (HasLocalControl)
 			desiredJump |= jumpAction.WasPressedThisFrame();
 		else
 			UpdateRemoteSkidMarks(Time.deltaTime);
@@ -421,7 +589,7 @@ public class MovingCar : NetworkBehaviour {
 	}
 
 	void FixedUpdate () {
-		if (!IsOwner) return; // non-owners are kinematic, NetworkTransform drives them
+		if (!HasLocalControl) return; // non-owners are kinematic, NetworkTransform drives them
 
 		Vector3 gravity;
 		Vector3 upAxis;
@@ -451,17 +619,19 @@ public class MovingCar : NetworkBehaviour {
 
 		UpdateState(upAxis);
 
-		// Landing — spike slip proportional to spin speed at impact
+		// Landing — spike slip proportional to spin speed at impact, reset airborne attitude
 		if (!wasGrounded && OnGround) {
 			landingYawVelocity = yawVelocity;
 			landingSlip = Mathf.Clamp01(Mathf.Abs(yawVelocity) / maxSlipYawRate);
+			_airPitch = 0f;
+			_airRoll  = 0f;
 		}
 		wasGrounded = OnGround;
 		landingSlip = Mathf.MoveTowards(landingSlip, 0f, slipRecoveryRate * Time.fixedDeltaTime);
 
-		Vector2 input    = moveAction.ReadValue<Vector2>();
-		float   throttle = input.y;
-		float   steer    = input.x;
+		Vector2 input      = moveAction.ReadValue<Vector2>();
+		float   throttle   = input.y;
+		float   steer      = input.x;
 		bool    isDrifting = driftAction.IsPressed();
 		if (IsSpawned && _networkDrifting.Value != isDrifting)
 			_networkDrifting.Value = isDrifting;
@@ -476,90 +646,121 @@ public class MovingCar : NetworkBehaviour {
 			float absSpeed    = Mathf.Abs(fwdSpeed);
 			float reverseSign = fwdSpeed >= 0f ? 1f : -1f;
 
-			// ── Steering ──────────────────────────────────────────────────────
-			float yawBoost = isDrifting ? driftYawMultiplier : 1f;
+			// ── Downforce & Curvature Adhesion ────────────────────────────────
+			// Keeps the car glued to spherical planets and curved tracks without
+			// bouncing off into orbit at high speeds. Suppressed briefly after jumping.
+			if (stepsSinceLastJump > 8) {
+				float speedRatio     = Mathf.Clamp01(velocity.magnitude / Mathf.Max(maxSpeed, 0.1f));
+				float aeroDownforce  = downforceStrength * (speedRatio * speedRatio);
+				float adhesion       = velocity.magnitude >= minAdhesionVelocity
+					? curvatureAdhesion
+					: curvatureAdhesion * (velocity.magnitude / minAdhesionVelocity);
+				float totalDownforce = aeroDownforce + adhesion;
+				_statDownforce = totalDownforce;
+				Vector3 downDir = contactNormal.sqrMagnitude > 0.001f ? -contactNormal : -upAxis;
+				body.AddForce(downDir * totalDownforce, ForceMode.Acceleration);
+			} else {
+				_statDownforce = 0f;
+			}
 
-			// [OLD] float steeringYaw = steer * (absSpeed / minTurningRadius) * Mathf.Rad2Deg * reverseSign * yawBoost;
-			// Problem: yawBoost applied with no ceiling. At high speed + drift the result
-			// can exceed the car's natural turning rate, causing uncontrolled spinning.
-			// Fix: compute the raw yaw rate first (correct physics: ω = v/r → deg/s),
-			// then clamp the final result to the natural maximum yaw at maxSpeed so
-			// drift oversteer feels aggressive but never breaks control entirely.
-			float rawSteeringYaw = steer * (absSpeed / minTurningRadius) * Mathf.Rad2Deg * reverseSign;
-			float yawRateCap     = (maxSpeed / minTurningRadius) * Mathf.Rad2Deg;
-			float steeringYaw    = Mathf.Clamp(rawSteeringYaw * yawBoost, -yawRateCap, yawRateCap);
+			// ── Drift State, Counter-Steering & Mini-Turbo ────────────────────
+			if (isDrifting && absSpeed > 2.5f) {
+				if (_driftDirection == 0f) {
+					if (Mathf.Abs(steer) > 0.1f)
+						_driftDirection = Mathf.Sign(steer);
+					else if (Mathf.Abs(Vector3.Dot(velocity, right)) > 0.3f)
+						_driftDirection = Mathf.Sign(Vector3.Dot(velocity, right));
+					else
+						_driftDirection = 1f;
+				}
+			} else if (!isDrifting || absSpeed < 1.5f) {
+				// Mini-turbo burst upon exiting a sustained drift!
+				if (_miniTurboReady && OnGround && absSpeed > 2f) {
+					body.AddForce(forward * miniTurboImpulse, ForceMode.VelocityChange);
+				}
+				_miniTurboReady    = false;
+				_driftChargeTimer  = 0f;
+				_driftDirection    = 0f;
+			}
+
+			float targetDriftAngle = 0f;
+			if (_driftDirection != 0f) {
+				// Turning into drift widens slip angle; counter-steering stabilizes and tightens arc
+				float steerWithDrift = steer * _driftDirection;
+				float angleFactor    = Mathf.Clamp(1f + steerWithDrift * counterSteerAuthority, 0.25f, 1.5f);
+				targetDriftAngle     = _driftDirection * (maxDriftAngle * angleFactor);
+
+				_driftChargeTimer += Time.fixedDeltaTime;
+				if (_driftChargeTimer >= miniTurboChargeTime)
+					_miniTurboReady = true;
+			}
+			_driftAngle = Mathf.MoveTowards(_driftAngle, targetDriftAngle, driftAngleRate * 10f * Time.fixedDeltaTime);
+
+			// ── Steering with Rotational Inertia ──────────────────────────────
+			float yawBoost = isDrifting ? driftYawMultiplier : 1f;
+			float rawSteeringYaw    = steer * (absSpeed / minTurningRadius) * Mathf.Rad2Deg * reverseSign;
+			float yawRateCap        = (maxSpeed / minTurningRadius) * Mathf.Rad2Deg * (isDrifting ? 1.35f : 1f);
+			float targetSteeringYaw = Mathf.Clamp(rawSteeringYaw * yawBoost, -yawRateCap, yawRateCap);
+
+			if (_driftDirection != 0f && Mathf.Abs(steer) < 0.1f) {
+				// Gentle self-steer along the drift curve when releasing the stick
+				targetSteeringYaw = _driftDirection * (yawRateCap * 0.45f);
+			}
+
+			float steerRate = yawInertiaSmoothRate * 20f;
+			yawVelocity = Mathf.MoveTowards(yawVelocity, targetSteeringYaw, steerRate * Time.fixedDeltaTime);
 
 			// Blend air-spin momentum into steering during landing slip
-			yawVelocity = Mathf.Lerp(steeringYaw, landingYawVelocity, landingSlip);
+			if (landingSlip > 0.001f)
+				yawVelocity = Mathf.Lerp(yawVelocity, landingYawVelocity, landingSlip);
+
 			yaw += yawVelocity * Time.fixedDeltaTime;
 
 			rotation = ComputeRotation();
 			forward  = rotation * Vector3.forward;
 			right    = rotation * Vector3.right;
 
-			// ── Engine ────────────────────────────────────────────────────────
-			if (throttle > 0f) {
-				if (fwdSpeed < maxSpeed) {
-					// Normal torque-curve zone
-					float speedRatio       = Mathf.Clamp01(fwdSpeed / maxSpeed);
-					float torqueMultiplier = torqueCurve.Evaluate(speedRatio);
-					body.AddForce(forward * (throttle * acceleration * torqueMultiplier), ForceMode.Acceleration);
+			// ── Engine with Surface Speed Scaling ─────────────────────────────
+			float effectiveMaxSpeed = maxSpeed * _groundSpeedMultiplier;
+			float effectiveTopSpeed = topSpeed * _groundSpeedMultiplier;
+			float effectiveAccel    = acceleration * Mathf.Clamp(_groundSpeedMultiplier, 0.35f, 1.25f);
 
-				// [OLD] } else if (fwdSpeed < topSpeed) {
-				// Problem: overdrive fired even while drifting, making a drift at maxSpeed
-				// push the car further above the normal speed limit — drift became a free
-				// speed exploit. Disable the overdrive zone entirely during drift.
-				} else if (fwdSpeed < topSpeed && !isDrifting) {
-					float overdriveRatio = Mathf.Clamp01((fwdSpeed - maxSpeed) / Mathf.Max(topSpeed - maxSpeed, 0.01f));
+			if (throttle > 0f) {
+				if (fwdSpeed < effectiveMaxSpeed) {
+					float speedRatio       = Mathf.Clamp01(fwdSpeed / effectiveMaxSpeed);
+					float torqueMultiplier = torqueCurve.Evaluate(speedRatio);
+					body.AddForce(forward * (throttle * effectiveAccel * torqueMultiplier), ForceMode.Acceleration);
+
+				} else if (fwdSpeed < effectiveTopSpeed && !isDrifting) {
+					float overdriveRatio = Mathf.Clamp01((fwdSpeed - effectiveMaxSpeed) / Mathf.Max(effectiveTopSpeed - effectiveMaxSpeed, 0.01f));
 					float force          = Mathf.Lerp(overdriveForce, 0f, overdriveRatio);
 					body.AddForce(forward * (throttle * force), ForceMode.Acceleration);
 				}
-				// At or above topSpeed (or drifting at/above maxSpeed): no further push.
 
 			} else if (throttle < 0f && fwdSpeed > 0f) {
-				// Blend smoothly from full brake (at speed) down to reverse torque (near zero).
-				// Scale brake force by surface friction — slippery surfaces have less bite.
 				float brakeBlend       = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(fwdSpeed / 2f));
-				float speedRatio       = Mathf.Clamp01(fwdSpeed / maxSpeed);
+				float speedRatio       = Mathf.Clamp01(fwdSpeed / Mathf.Max(effectiveMaxSpeed, 0.1f));
 				float torqueMultiplier = torqueCurve.Evaluate(speedRatio);
 				float brakeF           = -brakeForce * brakeBlend * _groundFriction;
-				float reverseF         = throttle * acceleration * torqueMultiplier * (1f - brakeBlend);
+				float reverseF         = throttle * effectiveAccel * torqueMultiplier * (1f - brakeBlend);
 				body.AddForce(forward * (brakeF + reverseF), ForceMode.Acceleration);
 
 			} else if (throttle < 0f) {
-				// Only push backward if we haven't already reached maxReverseSpeed.
-				// The torque curve alone can't guarantee this because it may still
-				// have a non-zero value at speedRatio = 1.
-				if (fwdSpeed > -maxReverseSpeed) {
-					float speedRatio       = Mathf.Clamp01(-fwdSpeed / maxReverseSpeed);
+				float effectiveReverse = maxReverseSpeed * _groundSpeedMultiplier;
+				if (fwdSpeed > -effectiveReverse) {
+					float speedRatio       = Mathf.Clamp01(-fwdSpeed / effectiveReverse);
 					float torqueMultiplier = torqueCurve.Evaluate(speedRatio);
-					body.AddForce(forward * (throttle * acceleration * torqueMultiplier), ForceMode.Acceleration);
+					body.AddForce(forward * (throttle * effectiveAccel * torqueMultiplier), ForceMode.Acceleration);
 				}
 
 			} else {
-				// Coasting — decelerate toward zero.
-				// [OLD] body.AddForce(forward * (-fwdSpeed * coastDeceleration), ForceMode.Acceleration);
-				// Problem: force scales with speed. At fwdSpeed=20 with coastDeceleration=8
-				// this produces −160 m/s², which is stronger than intentional braking (brakeForce=120).
-				// High-speed coasting would nearly stop the car in a single frame.
-				// Fix: cap the coast force to a fraction of brakeForce so coasting is always
-				// gentler than pressing the brake pedal.
-				// Scale coasting drag by surface friction — on ice the car barely slows.
 				float rawCoastForce  = -fwdSpeed * coastDeceleration * _groundFriction;
 				float coastForceCap  = brakeForce * 0.25f * _groundFriction;
 				body.AddForce(forward * Mathf.Clamp(rawCoastForce, -coastForceCap, coastForceCap), ForceMode.Acceleration);
 			}
 
-			// ── Lateral grip ──────────────────────────────────────────────────
-			// [OLD] float baseGrip      = isDrifting ? driftGrip : lateralGrip;
-			// [OLD] float effectiveGrip = baseGrip * (1f - landingSlip);
-			// Problem: when drifting AND landing at the same time, effectiveGrip → 0,
-			// leaving the car with zero lateral correction and no ability to recover.
-			// Fix: maintain a minimum grip floor so the car never loses all lateral
-			// stability, even in the worst combined scenario.
+			// ── Lateral Grip ──────────────────────────────────────────────────
 			float baseGrip      = isDrifting ? driftGrip : lateralGrip;
-			// Surface friction scales grip down — 1=normal road, near 0=ice.
-			// Keep a very small floor so the car can still be steered off a slippery surface.
 			float effectiveGrip = Mathf.Max(
 				baseGrip * (1f - landingSlip * 0.75f) * _groundFriction,
 				0.01f);
@@ -567,23 +768,55 @@ public class MovingCar : NetworkBehaviour {
 			lateralSpeed = Vector3.Dot(velocity, right);
 			body.AddForce(-right * lateralSpeed * effectiveGrip, ForceMode.VelocityChange);
 
-			// ── Drift speed cap ───────────────────────────────────────────────
-			// Cap the surface-plane component only — not total 3D velocity.
-			// Clamping the full magnitude would remove valid vertical momentum on
-			// ramps and curved surfaces, fighting slope-following gravity.
+			// ── Drift Speed Cap ───────────────────────────────────────────────
 			if (isDrifting) {
 				Vector3 surfaceVel   = Vector3.ProjectOnPlane(body.linearVelocity, upAxis);
 				float   surfaceSpeed = surfaceVel.magnitude;
-				if (surfaceSpeed > maxSpeed) {
-					// Subtract only the in-plane excess; vertical velocity is untouched.
-					body.AddForce(-surfaceVel.normalized * (surfaceSpeed - maxSpeed), ForceMode.VelocityChange);
+				if (surfaceSpeed > effectiveMaxSpeed) {
+					body.AddForce(-surfaceVel.normalized * (surfaceSpeed - effectiveMaxSpeed), ForceMode.VelocityChange);
 				}
 			}
 
 			body.MoveRotation(rotation);
 		} else {
-			if (yawVelocity != 0f) yaw += yawVelocity * Time.fixedDeltaTime;
-			body.MoveRotation(gravityCar.GravityAlignment * Quaternion.AngleAxis(yaw, Vector3.up));
+			// ── In-Air Control, Auto-Righting & Landing Pre-Alignment ─────────
+			_statDownforce    = 0f;
+			_driftAngle       = Mathf.MoveTowards(_driftAngle, 0f, 15f * Time.fixedDeltaTime);
+			_driftChargeTimer = 0f;
+			_miniTurboReady   = false;
+			_driftDirection   = 0f;
+
+			yawVelocity = Mathf.MoveTowards(yawVelocity, 0f, airAngularDamping * 20f * Time.fixedDeltaTime);
+
+			float pitchInput = throttle;
+			float yawInput   = isDrifting ? 0f : steer;
+			float rollInput  = isDrifting ? -steer : 0f;
+
+			yaw += (yawInput * airYawSpeed + yawVelocity) * Time.fixedDeltaTime;
+
+			_airPitch += pitchInput * airPitchSpeed * Time.fixedDeltaTime;
+			_airRoll  += rollInput * airRollSpeed * Time.fixedDeltaTime;
+
+			_airPitch = Mathf.MoveTowards(_airPitch, 0f, airAutoRightSpeed * 12f * Time.fixedDeltaTime);
+			_airRoll  = Mathf.MoveTowards(_airRoll,  0f, airAutoRightSpeed * 12f * Time.fixedDeltaTime);
+
+			_airPitch = Mathf.Clamp(_airPitch, -75f, 75f);
+			_airRoll  = Mathf.Clamp(_airRoll,  -75f, 75f);
+
+			Quaternion landingTilt = Quaternion.identity;
+			if (preAlignToLanding && Vector3.Dot(velocity, upAxis) < 0f) {
+				if (Physics.Raycast(body.position, -upAxis, out RaycastHit landHit, landingProbeDistance, probeMask)) {
+					if (Vector3.Dot(upAxis, landHit.normal) >= minGroundDot) {
+						float distFactor = 1f - Mathf.Clamp01(landHit.distance / landingProbeDistance);
+						Quaternion targetTilt = Quaternion.FromToRotation(upAxis, landHit.normal);
+						landingTilt = Quaternion.Slerp(Quaternion.identity, targetTilt, distFactor * 0.7f);
+					}
+				}
+			}
+
+			Quaternion baseAirHeading = gravityCar.GravityAlignment * Quaternion.AngleAxis(yaw, Vector3.up);
+			Quaternion airRotation = landingTilt * baseAirHeading * Quaternion.Euler(_airPitch, 0f, _airRoll);
+			body.MoveRotation(airRotation);
 		}
 
 		// Hop
@@ -596,8 +829,7 @@ public class MovingCar : NetworkBehaviour {
 			body.linearVelocity += upAxis * jumpSpeed;
 		}
 
-		// Re-read velocity AFTER all physics ops (grip, drift cap, snap, jump have
-		// all modified the actual rigidbody velocity since the cached snapshot).
+		// Re-read velocity AFTER all physics ops
 		Vector3 postVel     = body.linearVelocity;
 		float finalFwdSpeed = Vector3.Dot(postVel, forward);
 		float finalLatSpeed = Vector3.Dot(postVel, right);
@@ -612,11 +844,8 @@ public class MovingCar : NetworkBehaviour {
 		prevSpeed           = currentSpeed;
 		prevYawVelocity     = yawVelocity;
 
-		// EMA smoothing for inspector display — prevents the values from flickering when
-		// the object is selected or Gizmos are on (which forces constant Inspector repaints).
-		// Gameplay physics uses local fwdSpeed/velocity directly, not these stat fields.
 		const float displayThreshold = 0.5f;
-		float       a                = 15f * Time.fixedDeltaTime; // ~67 ms time constant
+		float       a                = 15f * Time.fixedDeltaTime;
 
 		_smoothAccel    = Mathf.Lerp(_smoothAccel,    Mathf.Clamp(rawAccel, -200f, 200f), a);
 		_smoothSpeed    = Mathf.Lerp(_smoothSpeed,    currentSpeed, a);
@@ -631,6 +860,11 @@ public class MovingCar : NetworkBehaviour {
 		statYawRate      = _smoothYawRate;
 		statGrounded     = OnGround;
 		statDrifting     = isDrifting && OnGround;
+		statDriftAngle   = _driftAngle;
+		statMiniTurboReady = _miniTurboReady;
+		statSurfaceName  = _currentSurfaceName;
+		statSurfaceSpeedMultiplier = _groundSpeedMultiplier;
+		statDownforce    = _statDownforce;
 		statLandingSlip  = landingSlip;
 		statGroundAngle  = OnGround ? Vector3.Angle(gravityCar.UpAxis, contactNormal) : 0f;
 		statGravityMagnitude = gravity.magnitude;
@@ -641,10 +875,10 @@ public class MovingCar : NetworkBehaviour {
 			&& hit.rigidbody != null;
 	}
 
-	// On flat ground: gravity alignment + yaw.
+	// On flat ground: gravity alignment + yaw + drift slip angle.
 	// On a ramp: tilts to match the contact normal.
 	Quaternion ComputeRotation () {
-		Quaternion heading = gravityCar.GravityAlignment * Quaternion.AngleAxis(yaw, Vector3.up);
+		Quaternion heading = gravityCar.GravityAlignment * Quaternion.AngleAxis(yaw + _driftAngle, Vector3.up);
 		if (OnGround && contactNormal.sqrMagnitude > 0f) {
 			Vector3 surfaceForward = Vector3.ProjectOnPlane(heading * Vector3.forward, contactNormal);
 			if (surfaceForward.sqrMagnitude > 0.001f)
@@ -657,21 +891,46 @@ public class MovingCar : NetworkBehaviour {
 		if (OnGround || SnapToGround(upAxis)) {
 			stepsSinceLastGrounded = 0;
 			if (groundContactCount > 1) contactNormal.Normalize();
-			// Average friction across all ground contacts this step.
-			_groundFriction = _groundFrictionCount > 0
-				? _groundFrictionSum / _groundFrictionCount
-				: 1f;
+
+			if (_surfaceSampleCount > 0) {
+				_targetFriction        = _accumFriction / _surfaceSampleCount;
+				_targetSpeedMultiplier = Mathf.Max(minSurfaceSpeedMultiplier, _accumSpeedMultiplier / _surfaceSampleCount);
+				_hazardDamagePerSecond = _accumDamage / _surfaceSampleCount;
+				_isOnHazard            = _accumHazardCount > 0;
+				_currentSurfaceName    = _lastSurfaceName;
+				_currentSurfaceTag     = _lastSurfaceTag;
+			} else {
+				_targetFriction        = 1f;
+				_targetSpeedMultiplier = 1f;
+				_hazardDamagePerSecond = 0f;
+				_isOnHazard            = false;
+				_currentSurfaceName    = "Ground";
+				_currentSurfaceTag     = "";
+			}
+
+			float blend = 1f - Mathf.Exp(-surfaceTransitionSpeed * Time.fixedDeltaTime);
+			_groundFriction        = Mathf.Lerp(_groundFriction,        _targetFriction,        blend);
+			_groundSpeedMultiplier = Mathf.Lerp(_groundSpeedMultiplier, _targetSpeedMultiplier, blend);
 		} else {
 			contactNormal   = upAxis;
-			_groundFriction = 1f;
+			float blend = 1f - Mathf.Exp(-surfaceTransitionSpeed * Time.fixedDeltaTime);
+			_groundFriction        = Mathf.Lerp(_groundFriction,        1f, blend);
+			_groundSpeedMultiplier = Mathf.Lerp(_groundSpeedMultiplier, 1f, blend);
+			_currentSurfaceName    = "Air";
+			_currentSurfaceTag     = "";
+			_isOnHazard            = false;
+			_hazardDamagePerSecond = 0f;
 		}
 	}
 
 	void ClearState () {
 		groundContactCount    = 0;
 		contactNormal         = Vector3.zero;
-		_groundFrictionSum    = 0f;
-		_groundFrictionCount  = 0;
+		_surfaceSampleCount   = 0;
+		_accumFriction        = 0f;
+		_accumSpeedMultiplier = 0f;
+		_accumDamage          = 0f;
+		_accumHazardCount     = 0;
 	}
 
 	bool SnapToGround (Vector3 upAxis) {
@@ -682,33 +941,71 @@ public class MovingCar : NetworkBehaviour {
 
 		groundContactCount = 1;
 		contactNormal      = hit.normal;
+		SampleSurface(hit.collider.gameObject, hit.point, hit.triangleIndex);
 		float dot = Vector3.Dot(velocity, hit.normal);
 		if (dot > 0f) body.linearVelocity = velocity - hit.normal * dot;
 		return true;
 	}
 
+	void SampleSurface (GameObject contactObj, Vector3 worldPoint, int triangleIndex = -1) {
+		if (contactObj == null) return;
+
+		float friction  = 1f;
+		float speedMult = 1f;
+		float damage    = 0f;
+		bool  hazard    = false;
+		string surfaceName = contactObj.name;
+		string surfaceTag  = contactObj.tag;
+
+		var sf = contactObj.GetComponent<SurfaceFriction>();
+		if (sf == null) sf = contactObj.GetComponentInParent<SurfaceFriction>();
+		if (sf != null) friction *= sf.Friction;
+
+		var ps = contactObj.GetComponent<PlanetSurface>();
+		if (ps == null) ps = contactObj.GetComponentInParent<PlanetSurface>();
+		if (ps != null) {
+			PlanetSurface.SurfaceProperties props = ps.GetSurfaceProperties(worldPoint, triangleIndex);
+			friction  *= props.frictionMultiplier;
+			speedMult *= props.speedMultiplier;
+			damage     = props.damagePerSecond;
+			hazard     = props.isHazard;
+			if (!string.IsNullOrEmpty(props.layerName) && props.layerName != "Default")
+				surfaceName = props.layerName;
+			if (!string.IsNullOrEmpty(props.tag))
+				surfaceTag = props.tag;
+		}
+
+		_surfaceSampleCount++;
+		_accumFriction        += friction;
+		_accumSpeedMultiplier += speedMult;
+		_accumDamage          += damage;
+		if (hazard) _accumHazardCount++;
+		_lastSurfaceName = surfaceName;
+		_lastSurfaceTag  = surfaceTag;
+	}
+
 	void OnCollisionEnter (Collision collision) {
-		if (IsSpawned && !IsOwner) return;
+		if (IsSpawned && !HasLocalControl) return;
 		EvaluateCollision(collision);
 	}
 
 	void OnCollisionStay  (Collision collision) {
-		if (IsSpawned && !IsOwner) return;
+		if (IsSpawned && !HasLocalControl) return;
 		EvaluateCollision(collision);
 	}
 
 	void EvaluateCollision (Collision collision) {
-		// Read surface friction once per colliding object (not per contact point).
-		var sf = collision.gameObject.GetComponent<SurfaceFriction>();
-		float friction = sf != null ? sf.Friction : 1f;
-
+		bool sampled = false;
 		for (int i = 0; i < collision.contactCount; i++) {
-			Vector3 normal = collision.GetContact(i).normal;
+			ContactPoint contact = collision.GetContact(i);
+			Vector3 normal = contact.normal;
 			if (Vector3.Dot(gravityCar.UpAxis, normal) >= minGroundDot) {
-				groundContactCount   += 1;
-				contactNormal        += normal;
-				_groundFrictionSum   += friction;
-				_groundFrictionCount += 1;
+				groundContactCount += 1;
+				contactNormal      += normal;
+				if (!sampled) {
+					SampleSurface(collision.gameObject, contact.point, -1);
+					sampled = true;
+				}
 			}
 		}
 	}
@@ -726,7 +1023,7 @@ public class MovingCar : NetworkBehaviour {
 	}
 
 	void UpdateRemoteSkidMarks (float deltaTime) {
-		if (!IsSpawned || IsOwner || skidMesh == null) return;
+		if (!IsSpawned || HasLocalControl || skidMesh == null) return;
 
 		Vector3 currentPosition = transform.position;
 		if (!_remoteSkidInitialized) {

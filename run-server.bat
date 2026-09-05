@@ -1,0 +1,3 @@
+@echo off
+echo Starting Windows build as a dedicated server...
+start "" "wbuilds\rolling-skys.exe" -batchmode -nographics -server -port 7777

@@ -49,7 +49,9 @@ public class PlanetSurface : MonoBehaviour
 
     // Vertex-colour arrays that mirror the mesh.  The painter writes into
     // these and calls CommitColors() to flush them back to the GPU.
-    Color[] _colors;
+    Color[]   _colors;
+    Vector3[] _cachedVertices;
+    int[]     _cachedTriangles;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Unity lifecycle
@@ -87,8 +89,14 @@ public class PlanetSurface : MonoBehaviour
 
         if (_mesh == null) return;
 
-        // Ensure we have a colour array matching the current vertex count.
         int vcount = _mesh.vertexCount;
+        if (_cachedVertices == null || _cachedVertices.Length != vcount)
+            _cachedVertices = _mesh.vertices;
+
+        if (_cachedTriangles == null)
+            _cachedTriangles = _mesh.triangles;
+
+        // Ensure we have a colour array matching the current vertex count.
         if (_colors == null || _colors.Length != vcount)
         {
             Color[] existing = _mesh.colors;
@@ -213,33 +221,123 @@ public class PlanetSurface : MonoBehaviour
     /// </summary>
     /// <param name="worldPoint">World-space position of the query.</param>
     /// <returns>The layer whose vertex-colour channel is strongest, or null.</returns>
+    /// <summary>
+    /// Returns the dominant <see cref="PlanetLayerData"/> at a world-space
+    /// point by finding the nearest mesh vertex and reading its colour weights.
+    /// </summary>
     public PlanetLayerData GetLayerAtPoint(Vector3 worldPoint)
     {
         if (_mesh == null || _colors == null) return null;
+        if (_cachedVertices == null || _cachedVertices.Length != _mesh.vertexCount)
+            _cachedVertices = _mesh.vertices;
 
-        // Find the nearest vertex to the world-space point.
-        Vector3[] verts    = _mesh.vertices;
-        int       bestIdx  = 0;
-        float     bestDist = float.MaxValue;
+        Vector3 localPoint = transform.InverseTransformPoint(worldPoint);
+        int   bestIdx  = 0;
+        float bestDist = float.MaxValue;
+        int   count    = _cachedVertices.Length;
 
-        for (int i = 0; i < verts.Length; i++)
+        for (int i = 0; i < count; i++)
         {
-            float d = Vector3.SqrMagnitude(transform.TransformPoint(verts[i]) - worldPoint);
+            float d = (_cachedVertices[i] - localPoint).sqrMagnitude;
             if (d < bestDist) { bestDist = d; bestIdx = i; }
         }
 
-        Color c = _colors[bestIdx];
-        float[] weights = { c.r, c.g, c.b, c.a };
+        if (bestIdx < 0 || bestIdx >= _colors.Length) return null;
+        return GetDominantLayer(_colors[bestIdx]);
+    }
 
+    /// <summary>
+    /// Returns the dominant <see cref="PlanetLayerData"/> for a hit triangle index.
+    /// Constant time O(1) query using cached mesh triangles.
+    /// </summary>
+    public PlanetLayerData GetLayerAtTriangle(int triangleIndex)
+    {
+        if (_mesh == null || _colors == null) return null;
+        if (_cachedTriangles == null)
+            _cachedTriangles = _mesh.triangles;
+
+        int idx = triangleIndex * 3;
+        if (triangleIndex < 0 || _cachedTriangles == null || idx + 2 >= _cachedTriangles.Length)
+            return null;
+
+        int v0 = _cachedTriangles[idx];
+        int v1 = _cachedTriangles[idx + 1];
+        int v2 = _cachedTriangles[idx + 2];
+
+        if (v0 >= _colors.Length || v1 >= _colors.Length || v2 >= _colors.Length)
+            return null;
+
+        Color c = (_colors[v0] + _colors[v1] + _colors[v2]) * 0.333333f;
+        return GetDominantLayer(c);
+    }
+
+    PlanetLayerData GetDominantLayer(Color c)
+    {
+        float[] weights = { c.r, c.g, c.b, c.a };
         int   dominantChannel = 0;
         float dominantWeight  = weights[0];
         for (int i = 1; i < 4; i++)
-            if (weights[i] > dominantWeight) { dominantWeight = weights[i]; dominantChannel = i; }
+        {
+            if (weights[i] > dominantWeight)
+            {
+                dominantWeight  = weights[i];
+                dominantChannel = i;
+            }
+        }
 
         if (dominantChannel < layers.Length)
             return layers[dominantChannel];
 
         return null;
+    }
+
+    public struct SurfaceProperties
+    {
+        public PlanetLayerData layer;
+        public float frictionMultiplier;
+        public float speedMultiplier;
+        public float damagePerSecond;
+        public bool  isHazard;
+        public string layerName;
+        public string tag;
+
+        public static SurfaceProperties Default => new SurfaceProperties
+        {
+            layer = null,
+            frictionMultiplier = 1f,
+            speedMultiplier    = 1f,
+            damagePerSecond    = 0f,
+            isHazard           = false,
+            layerName          = "Default",
+            tag                = ""
+        };
+    }
+
+    /// <summary>
+    /// High-performance query returning all gameplay properties for a point/triangle.
+    /// </summary>
+    public SurfaceProperties GetSurfaceProperties(Vector3 worldPoint, int triangleIndex = -1)
+    {
+        PlanetLayerData layer = null;
+        if (triangleIndex >= 0)
+            layer = GetLayerAtTriangle(triangleIndex);
+
+        if (layer == null)
+            layer = GetLayerAtPoint(worldPoint);
+
+        if (layer == null)
+            return SurfaceProperties.Default;
+
+        return new SurfaceProperties
+        {
+            layer              = layer,
+            frictionMultiplier = Mathf.Max(0.01f, layer.frictionMultiplier),
+            speedMultiplier    = Mathf.Max(0.1f, layer.speedMultiplier),
+            damagePerSecond    = Mathf.Max(0f, layer.damagePerSecond),
+            isHazard           = layer.isHazard,
+            layerName          = !string.IsNullOrEmpty(layer.layerName) ? layer.layerName : layer.name,
+            tag                = layer.tag ?? ""
+        };
     }
 
     // ──────────────────────────────────────────────────────────────────────────

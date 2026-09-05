@@ -82,6 +82,8 @@ public class LocalPlayerCanvasBinder : MonoBehaviour {
 
     static bool IsBindableCar (MovingCar candidate) {
         if (candidate == null || !candidate.isActiveAndEnabled) return false;
+        if (candidate.HasLocalControl) return true;
+        if (MovingCar.AnyOfflineSceneTestCarActive()) return false;
         if (candidate.IsSpawned) return candidate.IsOwner;
 
         NetworkManager networkManager = NetworkManager.Singleton;

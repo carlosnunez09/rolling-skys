@@ -490,7 +490,7 @@ MonoBehaviour:
   m_MaxConnectAttempts: 60
   m_DisconnectTimeoutMS: 30000
   ConnectionData:
-    Address: 127.0.0.1
+    Address: 100.103.143.71
     Port: 7777
     WebSocketPath: /
     ServerListenAddress: 0.0.0.0
@@ -554,7 +554,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameNetworkManager
   _port: 7777
-  _serverAddress: 127.0.0.1
+  _serverAddress: 100.103.143.71
   _listenAddress: 0.0.0.0
   _connectAutomatically: 0
   _gameSceneName: SampleScene

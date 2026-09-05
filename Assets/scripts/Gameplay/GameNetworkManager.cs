@@ -61,11 +61,19 @@ public class GameNetworkManager : MonoBehaviour {
                            "Ensure NetworkManager is in the scene and initialises before this script.");
         }
 
+        bool runAsServer = Array.Exists(Environment.GetCommandLineArgs(), arg => arg.Equals("-server", StringComparison.OrdinalIgnoreCase));
+        bool runAsHost = Array.Exists(Environment.GetCommandLineArgs(), arg => arg.Equals("-host", StringComparison.OrdinalIgnoreCase));
+
 #if UNITY_SERVER && !UNITY_EDITOR
         StartServer();
 #else
-        if (_connectAutomatically)
+        if (runAsServer) {
+            StartServer();
+        } else if (runAsHost) {
+            StartHost();
+        } else if (_connectAutomatically) {
             StartClient();
+        }
 #endif
     }
 
