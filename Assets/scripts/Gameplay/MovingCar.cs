@@ -212,7 +212,7 @@ public class MovingCar : NetworkBehaviour {
 	// ── Ground Detection ──────────────────────────────────────────────
 
 	[BoxGroup("Ground"), SerializeField, Range(0f, 90f)]
-	float maxGroundAngle = 40f;
+	float maxGroundAngle = 70f;
 
 	[BoxGroup("Ground"), SerializeField, Range(0f, 100f)]
 	float maxSnapSpeed = 50f;
@@ -425,6 +425,7 @@ public class MovingCar : NetworkBehaviour {
 	InputAction moveAction, jumpAction, driftAction;
 
 	void OnValidate () {
+		if (maxGroundAngle < 65f) maxGroundAngle = 65f;
 		minGroundDot = Mathf.Cos(maxGroundAngle * Mathf.Deg2Rad);
 		if (jumpHeight > 0f && maxJumpHeight == 3.8f && jumpHeight != 2f) {
 			maxJumpHeight = jumpHeight;
@@ -641,8 +642,7 @@ public class MovingCar : NetworkBehaviour {
 			return;
 		}
 
-		Vector3? groundNormal = (contactNormal.sqrMagnitude > 0.001f && !_jumpActive) ? contactNormal.normalized : (Vector3?)null;
-		gravity = gravityCar.UpdateAndApplyGravity(groundNormal);
+		gravity = gravityCar.UpdateAndApplyGravity();
 		upAxis  = gravityCar.UpAxis;
 
 		stepsSinceLastGrounded += 1;
@@ -685,6 +685,17 @@ public class MovingCar : NetworkBehaviour {
 		float lateralSpeed = 0f;
 
 		if (OnGround) {
+			// Deflect any velocity pushing into the ramp surface along the surface plane
+			// so the car glides smoothly up slopes without blunt-impact speed loss!
+			if (contactNormal.sqrMagnitude > 0.001f) {
+				float normalDot = Vector3.Dot(velocity, contactNormal);
+				if (normalDot < 0f) {
+					velocity -= contactNormal * normalDot;
+					body.linearVelocity = velocity;
+					fwdSpeed = Vector3.Dot(velocity, forward);
+				}
+			}
+
 			float absSpeed    = Mathf.Abs(fwdSpeed);
 			float reverseSign = fwdSpeed >= 0f ? 1f : -1f;
 
@@ -1009,11 +1020,20 @@ public class MovingCar : NetworkBehaviour {
 	bool SnapToGround (Vector3 upAxis) {
 		if (_jumpActive || stepsSinceLastJump < 25) return false;
 		if (stepsSinceLastGrounded > 4) return false;
-		if (Vector3.Dot(velocity, upAxis) > 0.1f) return false;
 		if (velocity.magnitude > maxSnapSpeed) return false;
-		if (!Physics.Raycast(body.position, -upAxis, out RaycastHit hit, probeDistance, probeMask)) return false;
+
+		// Probe along the vehicle's down direction (or world down) to find ground under the chassis on slopes
+		Vector3 probeDir = contactNormal.sqrMagnitude > 0.001f ? -contactNormal : -transform.up;
+		if (!Physics.Raycast(body.position, probeDir, out RaycastHit hit, probeDistance * 1.5f, probeMask)) {
+			if (!Physics.Raycast(body.position, -upAxis, out hit, probeDistance, probeMask))
+				return false;
+		}
+
 		Vector3 localUp = CustomGravity.GetUpAxis(hit.point);
-		if (Vector3.Dot(upAxis, hit.normal) < minGroundDot && Vector3.Dot(localUp, hit.normal) < minGroundDot) return false;
+		bool isGround = Vector3.Dot(upAxis, hit.normal) >= minGroundDot ||
+		                Vector3.Dot(localUp, hit.normal) >= minGroundDot ||
+		                (wasGrounded && Vector3.Dot(transform.up, hit.normal) >= minGroundDot);
+		if (!isGround) return false;
 
 		groundContactCount = 1;
 		contactNormal      = hit.normal;
@@ -1077,8 +1097,10 @@ public class MovingCar : NetworkBehaviour {
 			ContactPoint contact = collision.GetContact(i);
 			Vector3 normal = contact.normal;
 			Vector3 localUp = CustomGravity.GetUpAxis(contact.point);
-			if (Vector3.Dot(gravityCar.UpAxis, normal) >= minGroundDot ||
-			    Vector3.Dot(localUp, normal) >= minGroundDot) {
+			bool isGround = Vector3.Dot(gravityCar.UpAxis, normal) >= minGroundDot ||
+			                Vector3.Dot(localUp, normal) >= minGroundDot ||
+			                (wasGrounded && Vector3.Dot(transform.up, normal) >= minGroundDot);
+			if (isGround) {
 				groundContactCount += 1;
 				contactNormal      += normal;
 				if (!sampled) {

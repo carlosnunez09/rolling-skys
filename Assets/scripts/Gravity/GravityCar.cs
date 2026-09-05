@@ -25,15 +25,10 @@ public class GravityCar : MonoBehaviour {
 	}
 
 	// Called by MovingCar each FixedUpdate. Applies gravity force and returns it.
-	// Can receive groundNormalOverride when grounded to lock alignment flush to the driving surface.
-	public Vector3 UpdateAndApplyGravity (Vector3? groundNormalOverride = null) {
+	public Vector3 UpdateAndApplyGravity () {
 		Vector3 gravity = CustomGravity.GetGravity(body.position, out Vector3 upAxis);
 		UpAxis = upAxis;
-		if (groundNormalOverride.HasValue && groundNormalOverride.Value.sqrMagnitude > 0.001f) {
-			UpdateAlignment(groundNormalOverride.Value, fastAlign: true);
-		} else {
-			UpdateAlignment(upAxis, fastAlign: false);
-		}
+		UpdateAlignment(upAxis);
 		body.AddForce(gravity, ForceMode.Acceleration);
 		return gravity;
 	}
