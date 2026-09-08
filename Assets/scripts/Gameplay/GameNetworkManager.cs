@@ -113,6 +113,9 @@ public class GameNetworkManager : MonoBehaviour {
 
     /// <summary>Start as host for Steam lobby co-op using Steam P2P relay.</summary>
     public void StartSteamHost () {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening) {
+            NetworkManager.Singleton.Shutdown();
+        }
         if (!CanStartNetwork()) return;
         SteamP2PTransport transport = GetOrCreateSteamTransport();
         if (transport == null) {

@@ -91,7 +91,7 @@ public class DevPlaytestManager : MonoBehaviour {
 		if (Keyboard.current != null && Keyboard.current.f1Key.wasPressedThisFrame) {
 			ToggleMenu();
 		}
-		if (Gamepad.current != null && (Gamepad.current.startButton.wasPressedThisFrame || Gamepad.current.selectButton.wasPressedThisFrame)) {
+		if (Gamepad.current != null && Gamepad.current.selectButton.wasPressedThisFrame) {
 			ToggleMenu();
 		}
 

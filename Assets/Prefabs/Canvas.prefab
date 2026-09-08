@@ -1050,6 +1050,7 @@ GameObject:
   - component: {fileID: 5651687215506056613}
   - component: {fileID: 8724295486039940001}
   - component: {fileID: 8724295486039940002}
+  - component: {fileID: 3932329530867211810}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -1207,6 +1208,29 @@ MonoBehaviour:
   raceTimeText: {fileID: 0}
   positionText: {fileID: 0}
   debugBlock: {fileID: 0}
+  useTelemetryPanel: 1
+--- !u!114 &3932329530867211810
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3143663561288409872}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bebfd5a923cd103498864ee7ddb0baed, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::InGameEscMenu
+  _menuRoot: {fileID: 0}
+  _panel: {fileID: 0}
+  _titleText: {fileID: 0}
+  _sessionStatusText: {fileID: 0}
+  _resumeButton: {fileID: 0}
+  _inviteButton: {fileID: 0}
+  _inviteButtonText: {fileID: 0}
+  _respawnButton: {fileID: 0}
+  _mainMenuButton: {fileID: 0}
+  _hintText: {fileID: 0}
 --- !u!1 &3204033365523725339
 GameObject:
   m_ObjectHideFlags: 0
@@ -3069,7 +3093,7 @@ MonoBehaviour:
   m_text: test
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
-  m_sharedMaterial: {fileID: 0}
+  m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_fontSharedMaterials:
   - {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_fontMaterial: {fileID: 0}

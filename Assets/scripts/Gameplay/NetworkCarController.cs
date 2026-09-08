@@ -26,6 +26,13 @@ public class NetworkCarController : NetworkBehaviour {
     }
 
     void Start () {
+        if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening && !IsSpawned) {
+            // Live network session: player is spawned dynamically by GameNetworkManager.
+            // Disable this offline scene test car to avoid a duplicate ghost car on the track.
+            gameObject.SetActive(false);
+            return;
+        }
+
         if (_car != null && _car.OfflineSceneTestActive)
             RefreshNameTag();
     }

@@ -13,6 +13,7 @@ public class LocalPlayerCanvasBinder : MonoBehaviour {
     RaceRuntime _raceRuntime;
     CarHUD[] _huds;
     minimap[] _minimaps;
+    InGameEscMenu[] _escMenus;
 
     void Awake () {
         if (Application.isBatchMode) {
@@ -48,6 +49,13 @@ public class LocalPlayerCanvasBinder : MonoBehaviour {
 
         _huds = GetComponentsInChildren<CarHUD>(includeInactiveUi);
         _minimaps = GetComponentsInChildren<minimap>(includeInactiveUi);
+
+        if (_escMenus == null || _escMenus.Length == 0) {
+            InGameEscMenu escMenu = GetComponentInChildren<InGameEscMenu>(includeInactiveUi);
+            if (escMenu == null)
+                escMenu = gameObject.AddComponent<InGameEscMenu>();
+        }
+        _escMenus = GetComponentsInChildren<InGameEscMenu>(includeInactiveUi);
     }
 
     bool TryBindToLocalCar () {
@@ -66,6 +74,10 @@ public class LocalPlayerCanvasBinder : MonoBehaviour {
         foreach (minimap map in _minimaps)
             if (map != null)
                 map.BindToCar(localCar, _raceRuntime);
+
+        foreach (InGameEscMenu escMenu in _escMenus)
+            if (escMenu != null)
+                escMenu.BindToCar(localCar);
 
         _boundCar = localCar;
         return true;
