@@ -4,11 +4,33 @@ This document outlines the three core initiatives requested for Rolling Skys: fu
 
 ---
 
-## Issue #1: Comprehensive Controller & Gamepad Support with Haptics
+## Issue #3: Input Buffering for Jump and Actions
 
+- **GitHub Issue**: [#3](https://github.com/carlosnunez09/rolling-skys/issues/3)
+- **Status**: Completed (Closed)
+- **Priority**: High (P1)
+- **Labels**: `input`, `gameplay`
+- **Resolution**: Implemented in `MovingCar.cs` (`jumpBufferDuration = 0.18f`, `_jumpBufferTimer`)
+
+### 1. Problem Statement
+When approaching the ground from the air, pressing the jump button slightly before touching down would previously be lost or ignored because the vehicle was not yet grounded on that exact frame. This caused unresponsive or missed jump inputs when landing.
+
+### 2. Requirements & Scope
+1. **Jump Input Buffer Window**:
+   - Cache jump input intent over a configurable buffer window (`0.18s`).
+   - Process cached jump upon ground contact within the buffer duration.
+2. **Variable Jump Sustain**:
+   - Allow tapping for hop and holding for sustained ascent.
+
+---
+
+## Issue #4: Comprehensive Controller & Gamepad Support with Haptics
+
+- **GitHub Issue**: [#4](https://github.com/carlosnunez09/rolling-skys/issues/4)
 - **Status**: Completed (Closed)
 - **Priority**: Critical (P0)
 - **Labels**: `input`, `controller`, `polish`, `gameplay`
+- **Resolution**: Implemented in commit `005e672` (`InputDeviceManager.cs`, `CarHaptics.cs`, `MovingCar.cs`)
 
 ### 1. Problem Statement
 The current vehicle input bindings rely on a single 2D vector for movement where pushing forward on the left stick drives forward and pulling back brakes. This produces an awkward, unintuitive experience on gamepads. Modern racing players expect analog triggers (Right Trigger for throttle, Left Trigger for brake/reverse), stick steering with deadzone calibration, shoulder/face button drifting, jumping, and tactile haptic vibration feedback. In addition, players need a quick respawn/reset button if the vehicle tumbles into space or gets flipped.
@@ -37,11 +59,13 @@ The current vehicle input bindings rely on a single 2D vector for movement where
 
 ---
 
-## Issue #2: Interactive Tutorial & Mechanics Demonstration
+## Issue #5: Interactive Tutorial & Mechanics Demonstration
 
+- **GitHub Issue**: [#5](https://github.com/carlosnunez09/rolling-skys/issues/5)
 - **Status**: Completed (Closed)
 - **Priority**: High (P1)
 - **Labels**: `tutorial`, `demo`, `ui`, `onboarding`
+- **Resolution**: Implemented in commit `005e672` (`TutorialManager.cs`)
 
 ### 1. Problem Statement
 Rolling Skys features advanced, non-Euclidean physics: spherical planetary gravity, inverted ceiling driving, 70° ramps, variable jump sustains, and counter-steer mini-turbo drifting. New and internal testers need an intuitive, guided walkthrough that showcases how each mechanic functions before entering competitive multiplayer races.
@@ -61,11 +85,13 @@ Rolling Skys features advanced, non-Euclidean physics: spherical planetary gravi
 
 ---
 
-## Issue #3: Internal Playtest Demo Suite & Telemetry
+## Issue #6: Internal Playtest Demo Suite & Telemetry
 
+- **GitHub Issue**: [#6](https://github.com/carlosnunez09/rolling-skys/issues/6)
 - **Status**: Completed (Closed)
 - **Priority**: High (P1)
 - **Labels**: `playtest`, `dev-tools`, `analytics`, `qa`
+- **Resolution**: Implemented in commit `005e672` (`DevPlaytestManager.cs`, `CustomGravity.cs`)
 
 ### 1. Problem Statement
 Internal playtesters need quick feedback loops: resetting to specific track zones without restarting the game, monitoring performance and physics telemetry, testing physics edge cases (god mode, infinite boost, low gravity), and logging playtest data for tuning handling curves.
