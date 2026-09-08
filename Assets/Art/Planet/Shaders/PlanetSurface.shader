@@ -2,6 +2,7 @@ Shader "Planet Painting/PlanetSurface"
 {
     Properties
     {
+        [HideInInspector] _CameraCutawayExempt("Camera Cutaway Exempt", Float) = 0
         // ── Layer 0 (vertex R) ───────────────────────────────────────────────
         [Header(Layer 0  Vertex R)]
         [NoScaleOffset] _Layer0Albedo    ("Albedo",       2D)           = "white" {}
@@ -103,6 +104,7 @@ Shader "Planet Painting/PlanetSurface"
             #pragma multi_compile_fog
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             // ── Textures ─────────────────────────────────────────────────────
@@ -148,6 +150,7 @@ Shader "Planet Painting/PlanetSurface"
                 float _RimStrength;
                 float _NormalStrength;
                 float _DebugVertexColors;
+                float _CameraCutawayExempt;
             CBUFFER_END
 
             // ── Structs ──────────────────────────────────────────────────────
@@ -283,6 +286,7 @@ Shader "Planet Painting/PlanetSurface"
             // ── Fragment ─────────────────────────────────────────────────────
             half4 frag(Varyings IN) : SV_Target
             {
+                ApplyCameraCutaway(IN.positionWS, IN.positionHCS.xy, _CameraCutawayExempt);
                 float3 pos      = IN.positionWS;
                 float3 normalWS = normalize(IN.normalWS);
 
@@ -437,6 +441,7 @@ Shader "Planet Painting/PlanetSurface"
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 
             // Must match ForwardLit CBUFFER layout exactly for SRP Batcher.
@@ -463,6 +468,7 @@ Shader "Planet Painting/PlanetSurface"
                 float _RimStrength;
                 float _NormalStrength;
                 float _DebugVertexColors;
+                float _CameraCutawayExempt;
             CBUFFER_END
 
             struct ShadowAttribs
@@ -514,6 +520,7 @@ Shader "Planet Painting/PlanetSurface"
             #pragma multi_compile_instancing
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
 
             // Must match ForwardLit CBUFFER layout exactly for SRP Batcher.
             CBUFFER_START(UnityPerMaterial)
@@ -539,6 +546,7 @@ Shader "Planet Painting/PlanetSurface"
                 float _RimStrength;
                 float _NormalStrength;
                 float _DebugVertexColors;
+                float _CameraCutawayExempt;
             CBUFFER_END
 
             struct DepthAttribs
@@ -550,6 +558,7 @@ Shader "Planet Painting/PlanetSurface"
             struct DepthVaryings
             {
                 float4 positionCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
                 UNITY_VERTEX_OUTPUT_STEREO
             };
 
@@ -559,10 +568,11 @@ Shader "Planet Painting/PlanetSurface"
                 UNITY_SETUP_INSTANCE_ID(IN);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
                 OUT.positionCS = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 return OUT;
             }
 
-            half4 DepthFrag(DepthVaryings IN) : SV_Target { return 0; }
+            half4 DepthFrag(DepthVaryings IN) : SV_Target { ApplyCameraCutaway(IN.positionWS, IN.positionCS.xy, _CameraCutawayExempt); return 0; }
             ENDHLSL
         }
     }

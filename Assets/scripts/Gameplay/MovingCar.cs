@@ -422,7 +422,10 @@ public class MovingCar : NetworkBehaviour {
 
 	bool OnGround => groundContactCount > 0 && !_jumpActive && stepsSinceLastJump >= 8;
 
-	InputAction moveAction, jumpAction, driftAction;
+	InputAction moveAction, throttleAction, brakeAction, steerAction, jumpAction, driftAction, respawnAction;
+	CarHaptics _haptics;
+	Vector3 _initialSpawnPosition;
+	Quaternion _initialSpawnRotation;
 
 	void OnValidate () {
 		if (maxGroundAngle < 65f) maxGroundAngle = 65f;
@@ -468,6 +471,11 @@ public class MovingCar : NetworkBehaviour {
 		mr.receiveShadows    = false;
 		mr.lightProbeUsage   = UnityEngine.Rendering.LightProbeUsage.Off;
 
+		_initialSpawnPosition = transform.position;
+		_initialSpawnRotation = transform.rotation;
+		_haptics = GetComponent<CarHaptics>();
+		if (_haptics == null) _haptics = gameObject.AddComponent<CarHaptics>();
+
 		// Input actions — server has no player, no input
 		moveAction = new InputAction("CarMove", InputActionType.Value);
 		moveAction.AddCompositeBinding("2DVector")
@@ -477,13 +485,46 @@ public class MovingCar : NetworkBehaviour {
 			.With("Right", "<Keyboard>/d");
 		moveAction.AddBinding("<Gamepad>/leftStick");
 
+		// Trigger-based analog throttle & brake (racing standard)
+		throttleAction = new InputAction("CarThrottle", InputActionType.Value);
+		throttleAction.AddBinding("<Gamepad>/rightTrigger");
+		throttleAction.AddBinding("<Keyboard>/w");
+		throttleAction.AddBinding("<Keyboard>/upArrow");
+
+		brakeAction = new InputAction("CarBrake", InputActionType.Value);
+		brakeAction.AddBinding("<Gamepad>/leftTrigger");
+		brakeAction.AddBinding("<Keyboard>/s");
+		brakeAction.AddBinding("<Keyboard>/downArrow");
+
+		// Dedicated steering supporting stick and D-pad
+		steerAction = new InputAction("CarSteer", InputActionType.Value);
+		steerAction.AddBinding("<Gamepad>/leftStick/x");
+		steerAction.AddCompositeBinding("1DAxis")
+			.With("Negative", "<Gamepad>/dpad/left")
+			.With("Positive", "<Gamepad>/dpad/right");
+		steerAction.AddCompositeBinding("1DAxis")
+			.With("Negative", "<Keyboard>/a")
+			.With("Positive", "<Keyboard>/d");
+
+		// Jump action supporting face button A and right bumper/shoulder
 		jumpAction = new InputAction("CarJump", InputActionType.Button);
 		jumpAction.AddBinding("<Keyboard>/space");
 		jumpAction.AddBinding("<Gamepad>/buttonSouth");
+		jumpAction.AddBinding("<Gamepad>/rightShoulder");
 
+		// Drift action supporting bumpers and face buttons
 		driftAction = new InputAction("CarDrift", InputActionType.Button);
 		driftAction.AddBinding("<Keyboard>/leftShift");
 		driftAction.AddBinding("<Gamepad>/leftShoulder");
+		driftAction.AddBinding("<Gamepad>/rightShoulder");
+		driftAction.AddBinding("<Gamepad>/buttonEast");
+		driftAction.AddBinding("<Gamepad>/buttonWest");
+
+		// Quick respawn / reset to track
+		respawnAction = new InputAction("CarRespawn", InputActionType.Button);
+		respawnAction.AddBinding("<Keyboard>/r");
+		respawnAction.AddBinding("<Gamepad>/buttonNorth");
+		respawnAction.AddBinding("<Gamepad>/select");
 #endif
 	}
 
@@ -561,6 +602,69 @@ public class MovingCar : NetworkBehaviour {
 	}
 
 	/// <summary>
+	/// Resets the vehicle upright on the track at the last passed checkpoint,
+	/// or near the nearest ground surface with zeroed momentum.
+	/// </summary>
+	public void Respawn () {
+		Vector3 targetPos = _initialSpawnPosition;
+		Quaternion targetRot = _initialSpawnRotation;
+		bool foundWaypoint = false;
+
+		// 1. Try to respawn at the last passed waypoint if in a race
+		RaceRuntime race = FindAnyObjectByType<RaceRuntime>();
+		if (race != null && race.ActivePath != null) {
+			foreach (var racer in race.Racers) {
+				if (racer.Car == this && racer.LastPassedIndex >= 0) {
+					Waypoint wp = race.ActivePath.GetWaypoint(racer.LastPassedIndex);
+					if (wp != null) {
+						Vector3 up = CustomGravity.GetUpAxis(wp.transform.position);
+						targetPos = wp.transform.position + up * 1.5f;
+						Vector3 fwd = Vector3.ProjectOnPlane(wp.transform.forward, up);
+						if (fwd.sqrMagnitude < 0.001f) fwd = wp.transform.forward;
+						targetRot = Quaternion.LookRotation(fwd.normalized, up);
+						foundWaypoint = true;
+						break;
+					}
+				}
+			}
+		}
+
+		// 2. If no race waypoint, try probing down to nearest ground
+		if (!foundWaypoint) {
+			Vector3 currentUp = CustomGravity.GetUpAxis(body.position);
+			if (currentUp.sqrMagnitude < 0.001f) currentUp = Vector3.up;
+
+			if (Physics.Raycast(body.position + currentUp * 2f, -currentUp, out RaycastHit hit, 50f, probeMask, QueryTriggerInteraction.Ignore)) {
+				targetPos = hit.point + hit.normal * 1.2f;
+				Vector3 fwd = Vector3.ProjectOnPlane(transform.forward, hit.normal);
+				if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.ProjectOnPlane(Vector3.forward, hit.normal);
+				if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
+				targetRot = Quaternion.LookRotation(fwd.normalized, hit.normal);
+			}
+		}
+
+		body.position = targetPos;
+		body.rotation = targetRot;
+		body.linearVelocity = Vector3.zero;
+		body.angularVelocity = Vector3.zero;
+		velocity = Vector3.zero;
+
+		yaw = targetRot.eulerAngles.y;
+		yawVelocity = 0f;
+		prevSpeed = 0f;
+		landingSlip = 0f;
+		_driftAngle = 0f;
+		_driftDirection = 0f;
+		_driftChargeTimer = 0f;
+		_miniTurboReady = false;
+		_airPitch = 0f;
+		_airRoll = 0f;
+		_jumpActive = false;
+
+		_haptics?.TriggerImpulse(0.5f, 0.5f, 0.25f);
+	}
+
+	/// <summary>
 	/// Enable or disable player input without disabling the component.
 	/// Physics, gravity, and stats continue to update regardless.
 	/// </summary>
@@ -568,12 +672,20 @@ public class MovingCar : NetworkBehaviour {
 		_inputEnabled = on;
 		if (on) {
 			moveAction?.Enable();
+			throttleAction?.Enable();
+			brakeAction?.Enable();
+			steerAction?.Enable();
 			jumpAction?.Enable();
 			driftAction?.Enable();
+			respawnAction?.Enable();
 		} else {
 			moveAction?.Disable();
+			throttleAction?.Disable();
+			brakeAction?.Disable();
+			steerAction?.Disable();
 			jumpAction?.Disable();
 			driftAction?.Disable();
+			respawnAction?.Disable();
 			// Clear any queued jump so a press before lockout doesn't fire
 			// the moment input is re-enabled (e.g. race countdown locking input).
 			desiredJump = false;
@@ -584,15 +696,23 @@ public class MovingCar : NetworkBehaviour {
 	void OnEnable () {
 		if (_inputEnabled) {
 			moveAction?.Enable();
+			throttleAction?.Enable();
+			brakeAction?.Enable();
+			steerAction?.Enable();
 			jumpAction?.Enable();
 			driftAction?.Enable();
+			respawnAction?.Enable();
 		}
 	}
 
 	void OnDisable () {
 		moveAction?.Disable();
+		throttleAction?.Disable();
+		brakeAction?.Disable();
+		steerAction?.Disable();
 		jumpAction?.Disable();
 		driftAction?.Disable();
+		respawnAction?.Disable();
 	}
 
 	public override void OnDestroy () {
@@ -601,16 +721,23 @@ public class MovingCar : NetworkBehaviour {
 		if (skidMesh != null)      Destroy(skidMesh);
 		if (_skidFallbackMat != null) Destroy(_skidFallbackMat);
 		moveAction?.Dispose();
+		throttleAction?.Dispose();
+		brakeAction?.Dispose();
+		steerAction?.Dispose();
 		jumpAction?.Dispose();
 		driftAction?.Dispose();
+		respawnAction?.Dispose();
 	}
 
 	void Update () {
 #if !UNITY_SERVER || UNITY_EDITOR
 		if (HasLocalControl) {
-			if (jumpAction.WasPressedThisFrame()) {
+			if (jumpAction != null && jumpAction.WasPressedThisFrame()) {
 				_jumpBufferTimer = jumpBufferDuration;
 				desiredJump = true;
+			}
+			if (respawnAction != null && respawnAction.WasPressedThisFrame()) {
+				Respawn();
 			}
 		} else {
 			UpdateRemoteSkidMarks(Time.deltaTime);
@@ -667,6 +794,8 @@ public class MovingCar : NetworkBehaviour {
 			_airRoll  = 0f;
 			_jumpActive = false;
 			_jumpCooldownTimer = jumpCooldown;
+			float vertImpact = Mathf.Abs(Vector3.Dot(velocity, upAxis));
+			_haptics?.TriggerLanding(vertImpact);
 		} else if (wasGrounded && !OnGround) {
 			// Takeoff / Launch — seamlessly absorb drift angle into yaw heading
 			// and ensure drift rotation speed carries into airborne yaw velocity!
@@ -682,10 +811,15 @@ public class MovingCar : NetworkBehaviour {
 		wasGrounded = OnGround;
 		landingSlip = Mathf.MoveTowards(landingSlip, 0f, slipRecoveryRate * Time.fixedDeltaTime);
 
-		Vector2 input      = moveAction.ReadValue<Vector2>();
-		float   throttle   = input.y;
-		float   steer      = input.x;
-		bool    isDrifting = driftAction.IsPressed();
+		Vector2 input        = moveAction != null ? moveAction.ReadValue<Vector2>() : Vector2.zero;
+		float   trigThrottle = throttleAction != null ? throttleAction.ReadValue<float>() : 0f;
+		float   trigBrake    = brakeAction != null ? brakeAction.ReadValue<float>() : 0f;
+		float   throttle     = (trigThrottle > 0.01f || trigBrake > 0.01f) ? (trigThrottle - trigBrake) : input.y;
+
+		float   steerVal     = steerAction != null ? steerAction.ReadValue<float>() : 0f;
+		float   steer        = Mathf.Abs(steerVal) > 0.01f ? steerVal : input.x;
+
+		bool    isDrifting   = driftAction != null && driftAction.IsPressed();
 		if (IsSpawned && _networkDrifting.Value != isDrifting)
 			_networkDrifting.Value = isDrifting;
 
@@ -747,6 +881,7 @@ public class MovingCar : NetworkBehaviour {
 				// Mini-turbo burst upon exiting a sustained directional drift!
 				if (_miniTurboReady && OnGround && absSpeed > 2f) {
 					body.AddForce(forward * miniTurboImpulse, ForceMode.VelocityChange);
+					_haptics?.TriggerMiniTurboBurst();
 				}
 				_miniTurboReady    = false;
 				_driftChargeTimer  = 0f;
@@ -839,6 +974,9 @@ public class MovingCar : NetworkBehaviour {
 
 			lateralSpeed = Vector3.Dot(velocity, right);
 			body.AddForce(-right * lateralSpeed * effectiveGrip, ForceMode.VelocityChange);
+			if (isDrifting) {
+				_haptics?.SetDriftVibration(lateralSpeed, _miniTurboReady);
+			}
 
 			// ── Drift Speed Cap ───────────────────────────────────────────────
 			// In neutral slip, preserve linear momentum without capping; in directional drift cap to top speed.
@@ -901,6 +1039,7 @@ public class MovingCar : NetworkBehaviour {
 			_jumpActive        = true;
 			_jumpHoldTimer     = 0f;
 			stepsSinceLastJump = 0;
+			_haptics?.TriggerJumpLaunch();
 
 			// Seamlessly transfer drift angle into yaw heading upon jump launch
 			// and guarantee drift spin momentum carries into the jump
@@ -1107,6 +1246,9 @@ public class MovingCar : NetworkBehaviour {
 
 	void OnCollisionEnter (Collision collision) {
 		if (IsSpawned && !HasLocalControl) return;
+		float impact = collision.relativeVelocity.magnitude;
+		_haptics?.TriggerCollisionShock(impact);
+		DevPlaytestManager.Instance?.RecordCollision(impact);
 		EvaluateCollision(collision);
 	}
 

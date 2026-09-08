@@ -86,6 +86,9 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	[BoxGroup("Occlusion"), SerializeField]
 	LayerMask obstructionMask = -1;
 
+    readonly CameraObstructionSolver obstructionSolver = new CameraObstructionSolver();
+    CameraOcclusionFade occlusionFade;
+
 	// ── Interactive Controls ───────────────────────────────────────────
 
 	[BoxGroup("Interactive"), SerializeField, Label("Allow Manual Look / Zoom")]
@@ -111,15 +114,7 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	InputAction lookAction;
 	InputAction zoomAction;
 
-	Vector3 CameraHalfExtends {
-		get {
-			Vector3 h;
-			h.y = targetCamera.nearClipPlane * Mathf.Tan(0.5f * Mathf.Deg2Rad * targetCamera.fieldOfView);
-			h.x = h.y * targetCamera.aspect;
-			h.z = 0f;
-			return h;
-		}
-	}
+
 
 	public Transform Target => target;
 	public float CurrentOrbitAngle => orbitAngles.y;
@@ -127,6 +122,8 @@ public class CinematicOrbitCamera : MonoBehaviour {
 
 	void Awake () {
 		targetCamera = GetComponent<Camera>();
+        occlusionFade = GetComponent<CameraOcclusionFade>();
+        if (occlusionFade == null) occlusionFade = gameObject.AddComponent<CameraOcclusionFade>();
 		if (targetCamera != null) {
 			defaultFOV = targetCamera.fieldOfView;
 		}
@@ -158,6 +155,7 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	}
 
 	void OnDisable () {
+        if (occlusionFade != null) occlusionFade.enabled = false;
 		lookAction?.Disable();
 		zoomAction?.Disable();
 	}
@@ -171,7 +169,10 @@ public class CinematicOrbitCamera : MonoBehaviour {
 		if (target == null && autoFindPlayer)
 			TryFindPlayerTarget();
 
-		if (target == null) return;
+		if (target == null) {
+            occlusionFade.SetTarget(null, Vector3.zero);
+            return;
+        }
 
 		UpdateGravityAlignment();
 		UpdateFocusPoint();
@@ -184,28 +185,15 @@ public class CinematicOrbitCamera : MonoBehaviour {
 
 		Quaternion smoothedRotation = Quaternion.Slerp(
 			transform.rotation, lookRotation,
-			Mathf.Clamp01(rotationSmoothSpeed * Time.deltaTime));
+			1f - Mathf.Exp(-rotationSmoothSpeed * Time.deltaTime));
 
 		Vector3 lookDirection = smoothedRotation * Vector3.forward;
 		Vector3 lookPosition  = focusPoint - lookDirection * currentDistance;
 
-		// Occlusion avoidance with camera near-plane box cast
-		Vector3 rectOffset   = lookDirection * targetCamera.nearClipPlane;
-		Vector3 rectPosition = lookPosition + rectOffset;
-		Vector3 castFrom     = focusPoint;
-		Vector3 castLine     = rectPosition - castFrom;
-		float   castDistance = castLine.magnitude;
-
-		if (castDistance > 0.001f) {
-			Vector3 castDirection = castLine / castDistance;
-			if (Physics.BoxCast(
-				castFrom, CameraHalfExtends, castDirection, out RaycastHit hit,
-				smoothedRotation, castDistance, obstructionMask
-			)) {
-				rectPosition = castFrom + castDirection * hit.distance;
-				lookPosition = rectPosition - rectOffset;
-			}
-		}
+        lookPosition = obstructionSolver.Resolve(targetCamera, target, focusPoint, -lookDirection,
+            currentDistance, obstructionMask, 4f, 3f, true);
+        occlusionFade.enabled = true;
+        occlusionFade.SetTarget(target, target.position);
 
 		transform.SetPositionAndRotation(lookPosition, smoothedRotation);
 	}
@@ -321,6 +309,7 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	public void SetTarget (Transform newTarget) {
 		if (newTarget == null) return;
 		target = newTarget;
+        obstructionSolver.Reset();
 		focusPoint = target.position + (gravityAlignment * targetOffset);
 
 		if (useGravityAlignment) {

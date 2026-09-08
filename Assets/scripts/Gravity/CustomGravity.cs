@@ -3,6 +3,8 @@ using System.Collections.Generic;
 
 public static class CustomGravity {
 
+	public static float GlobalGravityScale = 1.0f;
+
 	static List<GravitySource> sources = new List<GravitySource>();
 
 	struct ActiveSample {
@@ -19,6 +21,7 @@ public static class CustomGravity {
 	// references from a previous session (no-Domain-Reload mode) can't corrupt it.
 	[UnityEngine.RuntimeInitializeOnLoadMethod(UnityEngine.RuntimeInitializeLoadType.SubsystemRegistration)]
 	static void ResetOnDomainReload () {
+		GlobalGravityScale = 1.0f;
 		sources = new List<GravitySource>();
 		sampleBuffer.Clear();
 	}
@@ -134,14 +137,14 @@ public static class CustomGravity {
 		return primary.gravity;
 	}
 
-	public static Vector3 GetGravity (Vector3 position) => EvaluateGravity(position);
+	public static Vector3 GetGravity (Vector3 position) => EvaluateGravity(position) * GlobalGravityScale;
 
 	public static Vector3 GetGravity (Vector3 position, out Vector3 upAxis) {
 		Vector3 g = EvaluateGravity(position);
 		// When gravity is zero (no active sources) fall back to world-up so the
 		// alignment quaternion never receives a zero vector and produces NaN.
 		upAxis = g.sqrMagnitude > 1e-6f ? -g.normalized : Vector3.up;
-		return g;
+		return g * GlobalGravityScale;
 	}
 
 	public static Vector3 GetUpAxis (Vector3 position) {

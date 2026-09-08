@@ -2,6 +2,7 @@ Shader "Custom/GrassToon"
 {
     Properties
     {
+        [HideInInspector] _CameraCutawayExempt("Camera Cutaway Exempt", Float) = 0
         [Header(Colors)]
         _RootColor("Root Color", Color) = (0.05, 0.25, 0.05, 1)
         _TipColor("Tip Color", Color) = (0.35, 0.75, 0.15, 1)
@@ -36,6 +37,7 @@ Shader "Custom/GrassToon"
         // ── Shared macro block ────────────────────────────────────────────────
         HLSLINCLUDE
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
 
         CBUFFER_START(UnityPerMaterial)
             half4  _RootColor;
@@ -52,7 +54,8 @@ Shader "Custom/GrassToon"
             half   _TaperSoftness;
             float  _TestBend;
             float  _DebugHeight;
-        CBUFFER_END
+            float _CameraCutawayExempt;
+            CBUFFER_END
 
         TEXTURE2D(_MainTex);
         SAMPLER(sampler_MainTex);
@@ -173,6 +176,7 @@ Shader "Custom/GrassToon"
 
             half4 frag(Varyings IN, half facing : VFACE) : SV_Target
             {
+                ApplyCameraCutaway(IN.positionWS, IN.positionHCS.xy, _CameraCutawayExempt);
                 // ── Mask ─────────────────────────────────────────────────────
                 // texMask reads the alpha channel, which Unity generates from
                 // the texture's grayscale luminance when imported with

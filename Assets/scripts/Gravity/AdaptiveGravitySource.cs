@@ -362,9 +362,10 @@ public class AdaptiveGravitySource : GravitySource {
 			distances.y = boundaryDistance.y - Mathf.Abs(localPos.y);
 			distances.z = boundaryDistance.z - Mathf.Abs(localPos.z);
 			if (distances.x < distances.y) {
-				vector.x = distances.x < distances.z
-					? BoxWallComponent(localPos.x, distances.x)
-					: BoxWallComponent(localPos.z, distances.z);
+				if (distances.x < distances.z)
+					vector.x = BoxWallComponent(localPos.x, distances.x);
+				else
+					vector.z = BoxWallComponent(localPos.z, distances.z);
 			} else if (distances.y < distances.z) {
 				vector.y = BoxWallComponent(localPos.y, distances.y);
 			} else {
@@ -379,7 +380,7 @@ public class AdaptiveGravitySource : GravitySource {
 		float g = gravityStrength;
 		if (distToWall > boxInnerDistance)
 			g *= 1f - (distToWall - boxInnerDistance) * boxInnerFalloffFactor;
-		return coord > 0f ? -g : g;
+		return coord > 0f ? g : -g;
 	}
 
 	// ─────────────────────────────────────────────────────────────────
@@ -387,6 +388,19 @@ public class AdaptiveGravitySource : GravitySource {
 	// ─────────────────────────────────────────────────────────────────
 
 	Vector3 BoxSingleFaceGravity (Vector3 position) {
+		Vector3 local = transform.InverseTransformDirection(position - transform.position);
+		// A road's single-face field must not affect cars outside its rectangular footprint.
+		switch (singleFaceAxis) {
+			case FaceAxis.UpY: case FaceAxis.DownY:
+				if (Mathf.Abs(local.x) > boundaryDistance.x || Mathf.Abs(local.z) > boundaryDistance.z) return Vector3.zero;
+				break;
+			case FaceAxis.RightX: case FaceAxis.LeftX:
+				if (Mathf.Abs(local.y) > boundaryDistance.y || Mathf.Abs(local.z) > boundaryDistance.z) return Vector3.zero;
+				break;
+			default:
+				if (Mathf.Abs(local.x) > boundaryDistance.x || Mathf.Abs(local.y) > boundaryDistance.y) return Vector3.zero;
+				break;
+		}
 		Vector3 normal   = FaceWorldNormal(singleFaceAxis);
 		float   distance = Vector3.Dot(normal, position - transform.position);
 

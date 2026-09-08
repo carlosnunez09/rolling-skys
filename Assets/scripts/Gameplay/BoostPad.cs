@@ -132,6 +132,7 @@ public class BoostPad : MonoBehaviour {
 
 		var car = other.GetComponentInParent<MovingCar>();
 		if (car == null) return;
+		if (!car.HasLocalControl) return;
 		if (car.IsTrajectoryLocked) return;
 
 		var rb = car.GetComponent<Rigidbody>();
@@ -271,7 +272,6 @@ public class BoostPad : MonoBehaviour {
 
 		for (int i = 0; i < trajectorySteps; i++) {
 			Vector3 gravity = CustomGravity.GetGravity(pos);
-			if (gravity.sqrMagnitude < 0.001f) gravity = Physics.gravity;
 
 			Vector3 nextVel = vel + gravity * trajectoryTimeStep;
 			Vector3 nextPos = pos + vel * trajectoryTimeStep

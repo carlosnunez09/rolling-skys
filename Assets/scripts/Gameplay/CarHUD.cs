@@ -145,6 +145,15 @@ public class CarHUD : MonoBehaviour {
     [BoxGroup("Debug Block"), SerializeField, Label("All Stats Block")]
     TextMeshProUGUI debugBlock;
 
+    [BoxGroup("Debug Block"), SerializeField, Label("Use Telemetry Panel")]
+    bool useTelemetryPanel = true;
+
+    readonly CarDebugPanel telemetry = new CarDebugPanel();
+    GameObject legacyHandling;
+    bool legacyHandlingWasActive;
+    bool legacyDebugWasEnabled;
+    bool telemetryInstalled;
+
     // ── Private State ─────────────────────────────────────────────────
 
     Texture2D _torqueGraphTex;
@@ -160,6 +169,15 @@ public class CarHUD : MonoBehaviour {
     void Start () {
         AutoWireUiReferences();
 
+        if (useTelemetryPanel) {
+            var handling = FindChildComponent<RectTransform>("HUD_Handling");
+            legacyHandling = handling != null ? handling.gameObject : null;
+            legacyHandlingWasActive = legacyHandling != null && legacyHandling.activeSelf;
+            legacyDebugWasEnabled = debugBlock != null && debugBlock.enabled;
+            telemetryInstalled = true;
+            SetLegacyTelemetryVisible(false);
+        }
+
         if (raceRuntime == null)
             raceRuntime = FindAnyObjectByType<RaceRuntime>();
 
@@ -171,6 +189,9 @@ public class CarHUD : MonoBehaviour {
         if (!IsBindableCar(car))
             TryBindLocalPlayerCar();
 
+        if (telemetryInstalled)
+            telemetry.Tick(IsBindableCar(car) ? car : null, raceRuntime);
+
         if (!IsBindableCar(car)) return;
         UpdateSpeedGauge();
         UpdateTorqueGraph();
@@ -178,6 +199,23 @@ public class CarHUD : MonoBehaviour {
         UpdateWorld();
         UpdateRacePanel();
         UpdateDebugBlock();
+    }
+
+    void OnGUI () {
+        if (telemetryInstalled) telemetry.Draw();
+    }
+
+    void OnEnable () {
+        if (telemetryInstalled) SetLegacyTelemetryVisible(false);
+    }
+
+    void OnDisable () {
+        if (telemetryInstalled) SetLegacyTelemetryVisible(true);
+    }
+
+    void SetLegacyTelemetryVisible (bool restore) {
+        if (legacyHandling != null) legacyHandling.SetActive(restore && legacyHandlingWasActive);
+        if (debugBlock != null) debugBlock.enabled = restore && legacyDebugWasEnabled;
     }
 
     public void BindToCar (MovingCar targetCar, RaceRuntime runtime = null) {

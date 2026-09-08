@@ -2,6 +2,7 @@ Shader "Custom/LeavesToon"
 {
     Properties
     {
+        [HideInInspector] _CameraCutawayExempt("Camera Cutaway Exempt", Float) = 0
         [Header(Colors)]
         _RootColor("Root Color", Color) = (0.1, 0.35, 0.05, 1)
         _TipColor("Tip Color", Color) = (0.35, 0.75, 0.15, 1)
@@ -32,6 +33,7 @@ Shader "Custom/LeavesToon"
         // ── Shared block ──────────────────────────────────────────────────────
         HLSLINCLUDE
         #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
 
         CBUFFER_START(UnityPerMaterial)
             half4  _RootColor;
@@ -46,7 +48,8 @@ Shader "Custom/LeavesToon"
             float4 _MainTex_ST;
             half   _Cutoff;
             float  _DebugHeight;
-        CBUFFER_END
+            float _CameraCutawayExempt;
+            CBUFFER_END
 
         TEXTURE2D(_MainTex);
         SAMPLER(sampler_MainTex);
@@ -118,6 +121,7 @@ Shader "Custom/LeavesToon"
 
             half4 frag(Varyings IN, half facing : VFACE) : SV_Target
             {
+                ApplyCameraCutaway(IN.positionWS, IN.positionHCS.xy, _CameraCutawayExempt);
                 // ── Alpha cutout ──────────────────────────────────────────────
                 half texMask = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, IN.uv).a;
                 clip(texMask - _Cutoff);

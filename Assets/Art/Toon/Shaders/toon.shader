@@ -2,6 +2,7 @@ Shader "Custom/toon"
 {
     Properties
     {
+        [HideInInspector] _CameraCutawayExempt("Camera Cutaway Exempt", Float) = 0
         [MainColor] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
         [MainTexture] _BaseMap("Base Map", 2D) = "white" {}
         _ShadowColor("Shadow Color", Color) = (0.2, 0.2, 0.2, 1)
@@ -28,6 +29,7 @@ Shader "Custom/toon"
             #pragma fragment fragOutline
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
 
             struct Attributes
             {
@@ -38,6 +40,7 @@ Shader "Custom/toon"
             struct Varyings
             {
                 float4 positionHCS : SV_POSITION;
+                float3 positionWS : TEXCOORD0;
             };
 
             CBUFFER_START(UnityPerMaterial)
@@ -49,12 +52,14 @@ Shader "Custom/toon"
                 float _SpecThreshold;
                 half4 _OutlineColor;
                 float _OutlineWidth;
+                float _CameraCutawayExempt;
             CBUFFER_END
 
             Varyings vertOutline(Attributes IN)
             {
                 Varyings OUT;
                 OUT.positionHCS = TransformObjectToHClip(IN.positionOS.xyz);
+                OUT.positionWS = TransformObjectToWorld(IN.positionOS.xyz);
                 float3 smoothNormalCS = mul((float3x3)UNITY_MATRIX_VP, mul((float3x3)UNITY_MATRIX_M, IN.tangentOS.xyz));
                 float2 offset = normalize(smoothNormalCS.xy) * (_OutlineWidth * OUT.positionHCS.w * 0.01);
                 OUT.positionHCS.xy += offset;
@@ -63,6 +68,7 @@ Shader "Custom/toon"
 
             half4 fragOutline(Varyings IN) : SV_Target
             {
+                ApplyCameraCutaway(IN.positionWS, IN.positionHCS.xy, _CameraCutawayExempt);
                 return _OutlineColor;
             }
 
@@ -80,6 +86,7 @@ Shader "Custom/toon"
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/Art/Toon/Shaders/CameraCutaway.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 
             struct Attributes
@@ -110,6 +117,7 @@ Shader "Custom/toon"
                 float _SpecThreshold;
                 half4 _OutlineColor;
                 float _OutlineWidth;
+                float _CameraCutawayExempt;
             CBUFFER_END
 
             Varyings vert(Attributes IN)
@@ -126,6 +134,7 @@ Shader "Custom/toon"
 
             half4 frag(Varyings IN) : SV_Target
             {
+                ApplyCameraCutaway(IN.positionWS, IN.positionHCS.xy, _CameraCutawayExempt);
                 half4 texColor = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, IN.uv);
                 float3 normalWS = normalize(IN.normalWS);
                 Light light = GetMainLight(IN.shadowCoord);

@@ -30,6 +30,18 @@ public class OrbitCamera : MonoBehaviour {
 	[BoxGroup("Distance"), SerializeField]
 	LayerMask obstructionMask = -1;
 
+    [BoxGroup("Distance"), SerializeField, Min(0.1f)]
+    float collisionRecoverySpeed = 4f;
+
+    [BoxGroup("Distance"), SerializeField, Min(0.5f)]
+    float minimumComfortDistance = 3f;
+
+    [BoxGroup("Distance"), SerializeField]
+    bool revealThroughToonObjects = true;
+
+    readonly CameraObstructionSolver obstructionSolver = new CameraObstructionSolver();
+    CameraOcclusionFade occlusionFade;
+
 	// ── Cinematic Orbit ───────────────────────────────────────────────
 
 	[BoxGroup("Cinematic Orbit"), SerializeField, Label("Enable Cinematic Mode")]
@@ -146,21 +158,13 @@ public class OrbitCamera : MonoBehaviour {
 
 	public void SetCinematicMode (bool active) {
 		_manualCinematic = active;
-		if (!active) _idleCinematic = false;
+        _idleTimer = 0f;
+        _idleCinematic = false;
 	}
 
 	public void ToggleCinematicMode () => SetCinematicMode(!IsCinematicActive);
 
-	Vector3 CameraHalfExtends {
-		get {
-			Vector3 h;
-			h.y = regularCamera.nearClipPlane *
-			      Mathf.Tan(0.5f * Mathf.Deg2Rad * regularCamera.fieldOfView);
-			h.x = h.y * regularCamera.aspect;
-			h.z = 0f;
-			return h;
-		}
-	}
+
 
 	void OnValidate () {
 		if (maxVerticalAngle < minVerticalAngle)
@@ -169,6 +173,9 @@ public class OrbitCamera : MonoBehaviour {
 
 	void Awake () {
 		regularCamera = GetComponent<Camera>();
+        occlusionFade = GetComponent<CameraOcclusionFade>();
+        if (occlusionFade == null) occlusionFade = gameObject.AddComponent<CameraOcclusionFade>();
+        occlusionFade.enabled = revealThroughToonObjects;
 		_cinematicTargetDistance = distance;
 
 		lookAction = new InputAction("Look", InputActionType.Value);
@@ -194,6 +201,7 @@ public class OrbitCamera : MonoBehaviour {
 	}
 
 	void OnDisable () {
+        if (occlusionFade != null) occlusionFade.enabled = false;
 		lookAction?.Disable();
 		cinematicToggleAction?.Disable();
 	}
@@ -207,7 +215,10 @@ public class OrbitCamera : MonoBehaviour {
 		if (focus == null && autoFindLocalPlayer)
 			TryAssignLocalPlayerFocus();
 
-		if (focus == null) return;
+		if (focus == null) {
+            occlusionFade.SetTarget(null, Vector3.zero);
+            return;
+        }
 
 		UpdateGravityAlignment();
 		UpdateFocusPoint();
@@ -224,6 +235,7 @@ public class OrbitCamera : MonoBehaviour {
 		}
 
 		UpdatePitch();
+        ConstrainAngles();
 
 		orbitRotation = Quaternion.Euler(orbitAngles);
 		Quaternion lookRotation = gravityAlignment * orbitRotation;
@@ -231,29 +243,16 @@ public class OrbitCamera : MonoBehaviour {
 		// Smooth rotation FIRST, then derive the position from the smoothed rotation.
 		Quaternion smoothedRotation = Quaternion.Slerp(
 			transform.rotation, lookRotation,
-			Mathf.Clamp01(rotationSmoothSpeed * Time.deltaTime));
+			1f - Mathf.Exp(-rotationSmoothSpeed * Time.deltaTime));
 
 		float currentDist = Mathf.Lerp(distance, _cinematicTargetDistance, _cinematicWeight);
 		Vector3 lookDirection = smoothedRotation * Vector3.forward;
 		Vector3 lookPosition  = focusPoint - lookDirection * currentDist;
 
-		// Occlusion — box cast from the focus point toward the camera's near plane.
-		Vector3 rectOffset    = lookDirection * regularCamera.nearClipPlane;
-		Vector3 rectPosition  = lookPosition + rectOffset;
-		Vector3 castFrom      = focusPoint;
-		Vector3 castLine      = rectPosition - castFrom;
-		float   castDistance  = castLine.magnitude;
-
-		if (castDistance > 0.001f) {
-			Vector3 castDirection = castLine / castDistance;
-			if (Physics.BoxCast(
-				castFrom, CameraHalfExtends, castDirection, out RaycastHit hit,
-				smoothedRotation, castDistance, obstructionMask
-			)) {
-				rectPosition = castFrom + castDirection * hit.distance;
-				lookPosition = rectPosition - rectOffset;
-			}
-		}
+        lookPosition = obstructionSolver.Resolve(regularCamera, focus, focusPoint, -lookDirection,
+            currentDist, obstructionMask, collisionRecoverySpeed, minimumComfortDistance, revealThroughToonObjects);
+        occlusionFade.enabled = revealThroughToonObjects;
+        if (revealThroughToonObjects) occlusionFade.SetTarget(focus, focus.position);
 
 		transform.SetPositionAndRotation(lookPosition, smoothedRotation);
 	}
@@ -262,6 +261,7 @@ public class OrbitCamera : MonoBehaviour {
 		if (target == null) return;
 
 		focus = target;
+        obstructionSolver.Reset();
 		focusBody  = focus.GetComponent<Rigidbody>();
 		Vector3 startUp = CustomGravity.GetUpAxis(focus.position);
 		gravityAlignment = startUp.sqrMagnitude > 0.001f
@@ -277,7 +277,7 @@ public class OrbitCamera : MonoBehaviour {
 		if (flatFwd.sqrMagnitude > 0.0001f)
 			orbitAngles.y = GetAngle(flatFwd.normalized);
 
-		transform.localRotation = orbitRotation = Quaternion.Euler(orbitAngles);
+		transform.rotation = gravityAlignment * (orbitRotation = Quaternion.Euler(orbitAngles));
 	}
 
 	void TryAssignLocalPlayerFocus () {
@@ -332,6 +332,10 @@ public class OrbitCamera : MonoBehaviour {
 			if (dist > focusRadius)
 				t = Mathf.Min(t, focusRadius / dist);
 			focusPoint = Vector3.Lerp(targetPoint, focusPoint, t);
+            // Lag must not drag the tracking pivot through a wall or leave it far behind a fast car.
+            focusPoint = targetPoint + Vector3.ClampMagnitude(focusPoint - targetPoint, 1.5f);
+            if (obstructionSolver.IsPathBlocked(targetPoint, focusPoint, focus, obstructionMask))
+                focusPoint = targetPoint;
 		} else {
 			focusPoint = targetPoint;
 		}
@@ -348,7 +352,7 @@ public class OrbitCamera : MonoBehaviour {
 
 		// Key toggle
 		if (allowKeyToggle && cinematicToggleAction != null && cinematicToggleAction.WasPressedThisFrame()) {
-			_manualCinematic = !_manualCinematic;
+			ToggleCinematicMode();
 			if (_manualCinematic) _cinematicWaveTimer = 0f;
 		}
 
@@ -356,7 +360,7 @@ public class OrbitCamera : MonoBehaviour {
 		float rawSpeed = focusBody != null ? focusBody.linearVelocity.magnitude : 0f;
 		Vector2 lookInput = lookAction != null ? lookAction.ReadValue<Vector2>() : Vector2.zero;
 
-		if (rawSpeed < 0.8f && lookInput.sqrMagnitude < 0.01f) {
+		if (rawSpeed < 0.8f && lookInput.sqrMagnitude < 0.01f && !obstructionSolver.IsObstructed) {
 			_idleTimer += Time.deltaTime;
 			if (autoCinematicWhenIdle && _idleTimer >= idleTimeToCinematic) {
 				_idleCinematic = true;

@@ -27,8 +27,8 @@ public class GravityCar : MonoBehaviour {
 	// Called by MovingCar each FixedUpdate. Applies gravity force and returns it.
 	public Vector3 UpdateAndApplyGravity () {
 		Vector3 gravity = CustomGravity.GetGravity(body.position, out Vector3 upAxis);
-		UpAxis = upAxis;
-		UpdateAlignment(upAxis);
+		if (gravity.sqrMagnitude > 1e-6f) UpAxis = upAxis;
+		UpdateAlignment(UpAxis);
 		body.AddForce(gravity, ForceMode.Acceleration);
 		return gravity;
 	}
@@ -39,8 +39,8 @@ public class GravityCar : MonoBehaviour {
 	/// </summary>
 	public Vector3 RefreshGravityState () {
 		Vector3 gravity = CustomGravity.GetGravity(body.position, out Vector3 upAxis);
-		UpAxis = upAxis;
-		UpdateAlignment(upAxis, fastAlign: false);
+		if (gravity.sqrMagnitude > 1e-6f) UpAxis = upAxis;
+		UpdateAlignment(UpAxis, fastAlign: false);
 		return gravity;
 	}
 
