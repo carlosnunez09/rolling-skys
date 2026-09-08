@@ -29,6 +29,16 @@ public class GameNetworkManager : MonoBehaviour {
     string _lastTargetAddress = "127.0.0.1:7777";
     readonly HashSet<ulong> _clientsAwaitingSceneSync = new HashSet<ulong>();
 
+    public enum ActiveNetworkMode {
+        Offline,
+        Solo,
+        SteamHost,
+        SteamClient,
+        DirectHost,
+        DirectClient,
+        DedicatedServer
+    }
+
     public bool IsListening => NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening;
     public bool IsClient    => NetworkManager.Singleton != null && NetworkManager.Singleton.IsClient;
     public bool IsServer    => NetworkManager.Singleton != null && NetworkManager.Singleton.IsServer;
@@ -36,6 +46,7 @@ public class GameNetworkManager : MonoBehaviour {
     public string ServerAddress => _serverAddress;
     public bool ConnectAutomatically => _connectAutomatically;
     public string StatusMessage => _statusMessage;
+    public ActiveNetworkMode CurrentMode { get; private set; } = ActiveNetworkMode.Offline;
 
     // ── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -87,13 +98,80 @@ public class GameNetworkManager : MonoBehaviour {
 
     // ── Public API ─────────────────────────────────────────────────────────────
 
-    /// <summary>Start as host and load the game scene for all clients.</summary>
+    /// <summary>Start in Solo Practice mode (local host, 127.0.0.1, no external network needed).</summary>
+    public void StartSoloHost () {
+        if (!CanStartNetwork()) return;
+        if (!ConfigureUnityTransport("127.0.0.1", _port, "127.0.0.1")) return;
+        bool started = NetworkManager.Singleton.StartHost();
+        Debug.Log($"GameNetworkManager: Solo Host started: {started}, scene: {_gameSceneName}");
+        if (!started) return;
+        CurrentMode = ActiveNetworkMode.Solo;
+        _statusMessage = "Solo Practice";
+        SubscribeSceneEvents();
+        NetworkManager.Singleton.SceneManager.LoadScene(_gameSceneName, LoadSceneMode.Single);
+    }
+
+    /// <summary>Start as host for Steam lobby co-op using Steam P2P relay.</summary>
+    public void StartSteamHost () {
+        if (!CanStartNetwork()) return;
+        SteamP2PTransport transport = GetOrCreateSteamTransport();
+        if (transport == null) {
+            _statusMessage = "Steam transport unavailable";
+            return;
+        }
+        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+        bool started = NetworkManager.Singleton.StartHost();
+        Debug.Log($"GameNetworkManager: Steam Host started: {started}, scene: {_gameSceneName}");
+        if (!started) return;
+        CurrentMode = ActiveNetworkMode.SteamHost;
+        _statusMessage = "Hosting Steam Lobby";
+        SubscribeSceneEvents();
+        NetworkManager.Singleton.SceneManager.LoadScene(_gameSceneName, LoadSceneMode.Single);
+    }
+
+    /// <summary>Connect to a Steam host by Steam ID.</summary>
+    public void StartSteamClient (ulong hostSteamId) {
+        if (!CanStartNetwork()) return;
+        SteamP2PTransport transport = GetOrCreateSteamTransport();
+        if (transport == null) {
+            _statusMessage = "Steam transport unavailable";
+            return;
+        }
+        transport.TargetSteamID = hostSteamId;
+        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
+        bool started = NetworkManager.Singleton.StartClient();
+        CurrentMode = ActiveNetworkMode.SteamClient;
+        _statusMessage = started ? "Connecting via Steam..." : "Failed to connect to Steam host";
+        Debug.Log($"GameNetworkManager: Steam Client connect started: {started}, target: {hostSteamId}");
+    }
+
+    /// <summary>Connect to a server/host at the given endpoint (IP:Port).</summary>
+    public void StartDirectClient (string endpoint) {
+        if (!CanStartNetwork()) return;
+        if (!TryParseEndpoint(endpoint, out string targetAddress, out ushort targetPort)) {
+            _statusMessage = $"Invalid server address: {endpoint}";
+            Debug.LogError($"GameNetworkManager: Invalid server endpoint '{endpoint}'.");
+            return;
+        }
+
+        _lastTargetAddress = $"{targetAddress}:{targetPort}";
+        if (!ConfigureUnityTransport(targetAddress, targetPort, null)) return;
+        bool started = NetworkManager.Singleton.StartClient();
+        CurrentMode = ActiveNetworkMode.DirectClient;
+        _statusMessage = started
+            ? $"Connecting to {targetAddress}:{targetPort}"
+            : $"Failed to start client for {targetAddress}:{targetPort}";
+        Debug.Log($"GameNetworkManager: Direct Client connect started: {started}, address: {targetAddress}, port: {targetPort}");
+    }
+
+    /// <summary>Start as direct IP host and load the game scene for all clients.</summary>
     public void StartHost () {
         if (!CanStartNetwork()) return;
         if (!ConfigureUnityTransport("127.0.0.1", _port, _listenAddress)) return;
         bool started = NetworkManager.Singleton.StartHost();
         Debug.Log($"GameNetworkManager: Host start result: {started}, port: {_port}, listen: {_listenAddress}, scene: {_gameSceneName}");
         if (!started) return;
+        CurrentMode = ActiveNetworkMode.DirectHost;
         _statusMessage = $"Hosting on port {_port}";
         SubscribeSceneEvents();
         NetworkManager.Singleton.SceneManager.LoadScene(_gameSceneName, LoadSceneMode.Single);
@@ -106,6 +184,7 @@ public class GameNetworkManager : MonoBehaviour {
         bool started = NetworkManager.Singleton.StartServer();
         Debug.Log($"GameNetworkManager: Server start result: {started}, port: {_port}, listen: {_listenAddress}, scene: {_gameSceneName}");
         if (!started) return;
+        CurrentMode = ActiveNetworkMode.DedicatedServer;
         _statusMessage = $"Server listening on {_listenAddress}:{_port}";
         SubscribeSceneEvents();
         NetworkManager.Singleton.SceneManager.LoadScene(_gameSceneName, LoadSceneMode.Single);
@@ -113,25 +192,7 @@ public class GameNetworkManager : MonoBehaviour {
 
     /// <summary>Connect to the configured host. The server will push the game scene.</summary>
     public void StartClient () {
-        StartClient(BuildConfiguredEndpoint());
-    }
-
-    /// <summary>Connect to a host at the given address. The server will push the game scene.</summary>
-    void StartClient (string endpoint) {
-        if (!CanStartNetwork()) return;
-        if (!TryParseEndpoint(endpoint, out string targetAddress, out ushort targetPort)) {
-            _statusMessage = $"Invalid server address: {endpoint}";
-            Debug.LogError($"GameNetworkManager: Invalid server endpoint '{endpoint}'. Use 127.0.0.1:7777 for local play or your Edgegap Game Port endpoint as host:external-port.");
-            return;
-        }
-
-        _lastTargetAddress = $"{targetAddress}:{targetPort}";
-        if (!ConfigureUnityTransport(targetAddress, targetPort, null)) return;
-        bool started = NetworkManager.Singleton.StartClient();
-        _statusMessage = started
-            ? $"Connecting to {targetAddress}:{targetPort}"
-            : $"Failed to start client for {targetAddress}:{targetPort}";
-        Debug.Log($"GameNetworkManager: Client connect started: {started}, address: {targetAddress}, port: {targetPort}. This only means the client began connecting; OnClientConnected confirms success.");
+        StartDirectClient(BuildConfiguredEndpoint());
     }
 
     /// <summary>Disconnect and reset session state so a new session can be started.</summary>
@@ -139,11 +200,18 @@ public class GameNetworkManager : MonoBehaviour {
         if (NetworkManager.Singleton != null && NetworkManager.Singleton.IsListening)
             NetworkManager.Singleton.Shutdown();
 
+        SteamLobbyManager.Instance?.LeaveLobby();
+
         _gameSceneLoaded = false;
         _spawnPoints     = null;    // force re-cache from next game scene
         _nextSpawnIndex  = 0;
+        CurrentMode      = ActiveNetworkMode.Offline;
         _statusMessage   = "Offline";
         _clientsAwaitingSceneSync.Clear();
+
+        if (SceneManager.GetActiveScene().name != "MainMenu") {
+            SceneManager.LoadScene("MainMenu");
+        }
     }
 
     // ── Scene event handling ───────────────────────────────────────────────────
@@ -203,8 +271,28 @@ public class GameNetworkManager : MonoBehaviour {
     void OnClientConnected (ulong clientId) {
         if (NetworkManager.Singleton == null) return;
 
-        if (NetworkManager.Singleton.LocalClientId == clientId)
-            _statusMessage = NetworkManager.Singleton.IsHost ? $"Hosting on port {_port}" : "Connected";
+        if (NetworkManager.Singleton.LocalClientId == clientId) {
+            switch (CurrentMode) {
+                case ActiveNetworkMode.Solo:
+                    _statusMessage = "Solo Practice";
+                    break;
+                case ActiveNetworkMode.SteamHost:
+                    _statusMessage = "Hosting Steam Lobby";
+                    break;
+                case ActiveNetworkMode.SteamClient:
+                    _statusMessage = "Connected via Steam";
+                    break;
+                case ActiveNetworkMode.DirectHost:
+                    _statusMessage = $"Hosting on port {_port}";
+                    break;
+                case ActiveNetworkMode.DedicatedServer:
+                    _statusMessage = $"Server listening on {_listenAddress}:{_port}";
+                    break;
+                default:
+                    _statusMessage = NetworkManager.Singleton.IsHost ? $"Hosting on port {_port}" : "Connected";
+                    break;
+            }
+        }
 
         Debug.Log($"GameNetworkManager: Client connected: {clientId}");
 
@@ -235,6 +323,11 @@ public class GameNetworkManager : MonoBehaviour {
             _statusMessage = maxAttemptsReached
                 ? $"Connection failed: no server responded at {_lastTargetAddress}"
                 : string.IsNullOrWhiteSpace(reason) ? "Disconnected" : $"Disconnected: {reason}";
+            CurrentMode = ActiveNetworkMode.Offline;
+
+            if (SceneManager.GetActiveScene().name != "MainMenu") {
+                SceneManager.LoadScene("MainMenu");
+            }
         }
 
         Debug.LogWarning($"GameNetworkManager: Client disconnected: {clientId}. Reason: {reason}");
@@ -352,7 +445,7 @@ public class GameNetworkManager : MonoBehaviour {
         && client.PlayerObject != null;
 
     void RebuildRaceRuntime () {
-        FindFirstObjectByType<RaceRuntime>()?.RebuildRacerList();
+        FindAnyObjectByType<RaceRuntime>()?.RebuildRacerList();
     }
 
     bool CanStartNetwork () {
@@ -368,13 +461,31 @@ public class GameNetworkManager : MonoBehaviour {
     }
 
     bool ConfigureUnityTransport (string address, ushort port, string listenAddress) {
-        if (!NetworkManager.Singleton.TryGetComponent(out UnityTransport transport)) {
+        UnityTransport transport = GetOrCreateUnityTransport();
+        if (transport == null) {
             Debug.LogError("GameNetworkManager: NetworkManager needs a UnityTransport component.");
             _statusMessage = "Network transport missing";
             return false;
         }
+        NetworkManager.Singleton.NetworkConfig.NetworkTransport = transport;
         transport.SetConnectionData(true, address, port, listenAddress);
         return true;
+    }
+
+    UnityTransport GetOrCreateUnityTransport () {
+        if (NetworkManager.Singleton == null) return null;
+        if (!NetworkManager.Singleton.TryGetComponent(out UnityTransport transport)) {
+            transport = NetworkManager.Singleton.gameObject.AddComponent<UnityTransport>();
+        }
+        return transport;
+    }
+
+    SteamP2PTransport GetOrCreateSteamTransport () {
+        if (NetworkManager.Singleton == null) return null;
+        if (!NetworkManager.Singleton.TryGetComponent(out SteamP2PTransport transport)) {
+            transport = NetworkManager.Singleton.gameObject.AddComponent<SteamP2PTransport>();
+        }
+        return transport;
     }
 
     bool TryParseEndpoint (string endpoint, out string address, out ushort port) {
