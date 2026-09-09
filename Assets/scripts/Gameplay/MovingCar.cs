@@ -115,20 +115,6 @@ public class MovingCar : NetworkBehaviour {
 	[BoxGroup("Surface Handling"), SerializeField, Range(1f, 30f), Label("Surface Transition Speed")]
 	float surfaceTransitionSpeed = 8f;
 
-	// ── Wall Handling ─────────────────────────────────────────────────
-
-	[BoxGroup("Wall Handling"), SerializeField, Range(0f, 50f), Label("Wall Speed Penalty  %")]
-	[Tooltip("Percentage of forward speed scrubbed per second while scraping against a wall. 0 = frictionless glide, 5 = light scrape penalty.")]
-	float wallSpeedPenalty = 5f;
-
-	[BoxGroup("Wall Handling"), SerializeField, Range(0f, 3f), Label("Wall Bounce Impulse  m/s")]
-	[Tooltip("Gentle push away from wall surface to prevent snagging on geometry seams.")]
-	float wallBounceImpulse = 0.4f;
-
-	[BoxGroup("Wall Handling"), SerializeField, Label("Glance Off Walls")]
-	[Tooltip("Smoothly re-aligns car heading parallel to the wall when grazing at shallow angles.")]
-	bool wallGlanceDeflection = true;
-
 	// ── Downforce ─────────────────────────────────────────────────────
 
 	[BoxGroup("Downforce"), SerializeField, Range(0f, 150f), Label("Downforce Strength")]
@@ -322,15 +308,6 @@ public class MovingCar : NetworkBehaviour {
 	public string GravitySource  => statGravitySource;
 	public bool  RigidbodyBelow  => statRigidbodyBelow;
 	public float GroundFriction  => _groundFriction;
-	public bool  IsTouchingWall  => wallContactCount > 0;
-	public float WallSpeedPenalty {
-		get => wallSpeedPenalty;
-		set => wallSpeedPenalty = Mathf.Clamp(value, 0f, 100f);
-	}
-	public float WallBounceImpulse {
-		get => wallBounceImpulse;
-		set => wallBounceImpulse = Mathf.Max(0f, value);
-	}
 
 	/// Normalised speed ratio [0–1] — matches the X axis of the torque curve.
 	public float SpeedRatio => maxSpeed > 0f ? Mathf.Clamp01(statSpeed / maxSpeed) : 0f;
@@ -361,8 +338,6 @@ public class MovingCar : NetworkBehaviour {
 	Vector3 velocity;
 	Vector3 contactNormal;
 	int groundContactCount;
-	Vector3 wallContactNormal;
-	int wallContactCount;
 	int stepsSinceLastGrounded, stepsSinceLastJump;
 	bool desiredJump;
 	bool  _jumpActive;
@@ -477,22 +452,6 @@ public class MovingCar : NetworkBehaviour {
 		// Initialise so the first acceleration reading is 0, not a spike from
 		// (currentSpeed - 0) / fixedDeltaTime on the very first FixedUpdate.
 		prevSpeed = 0f;
-
-		// Ensure chassis colliders use a frictionless material so PhysX doesn't bind on wall edges.
-		// All wall friction/speed penalty is handled via code (tunable via wallSpeedPenalty slider).
-		PhysicsMaterial frictionlessMat = new PhysicsMaterial("FrictionlessChassis") {
-			dynamicFriction = 0f,
-			staticFriction  = 0f,
-			bounciness      = 0.02f,
-			frictionCombine = PhysicsMaterialCombine.Minimum,
-			bounceCombine   = PhysicsMaterialCombine.Average
-		};
-		Collider[] cols = GetComponentsInChildren<Collider>(true);
-		foreach (Collider col in cols) {
-			if (col != null && !col.isTrigger) {
-				col.sharedMaterial = frictionlessMat;
-			}
-		}
 
 #if !UNITY_SERVER || UNITY_EDITOR
 		// Skid mark mesh — client visual only, never needed on server
@@ -900,45 +859,6 @@ public class MovingCar : NetworkBehaviour {
 				}
 			}
 
-			// ── Wall Collision Deflection & Controlled Friction ───────────
-			if (wallContactCount > 0 && wallContactNormal.sqrMagnitude > 0.001f) {
-				Vector3 avgWallNormal = wallContactNormal.normalized;
-				float wallDot = Vector3.Dot(velocity, avgWallNormal);
-				if (wallDot < 0f) {
-					// Deflect velocity penetrating into the wall so the car slides along it
-					velocity -= avgWallNormal * wallDot;
-
-					// Gentle bounce impulse away from wall to prevent catching geometry seams
-					if (wallBounceImpulse > 0f) {
-						velocity += avgWallNormal * wallBounceImpulse;
-					}
-
-					// Apply controlled wall scrape penalty from the slider
-					if (wallSpeedPenalty > 0f) {
-						float penalty = Mathf.Clamp01((wallSpeedPenalty / 100f) * Time.fixedDeltaTime);
-						velocity *= (1f - penalty);
-					}
-
-					body.linearVelocity = velocity;
-					fwdSpeed = Vector3.Dot(velocity, forward);
-				}
-
-				// If grazing at a shallow angle, deflect yaw away from the wall so the nose doesn't bite
-				if (wallGlanceDeflection) {
-					float noseIntoWall = Vector3.Dot(forward, -avgWallNormal);
-					if (noseIntoWall > 0.02f && noseIntoWall < 0.75f) {
-						Vector3 wallTangent = Vector3.ProjectOnPlane(forward, avgWallNormal).normalized;
-						if (wallTangent.sqrMagnitude > 0.5f) {
-							Quaternion targetRot = Quaternion.LookRotation(wallTangent, upAxis);
-							Quaternion rel = Quaternion.Inverse(gravityCar.GravityAlignment) * targetRot;
-							float targetYaw = rel.eulerAngles.y;
-							if (targetYaw > 180f) targetYaw -= 360f;
-							yaw = Mathf.MoveTowardsAngle(yaw, targetYaw, 45f * Time.fixedDeltaTime);
-						}
-					}
-				}
-			}
-
 			float absSpeed    = Mathf.Abs(fwdSpeed);
 			float reverseSign = fwdSpeed >= 0f ? 1f : -1f;
 
@@ -1089,23 +1009,6 @@ public class MovingCar : NetworkBehaviour {
 			body.MoveRotation(rotation);
 		} else {
 			// ── In-Air Control, Auto-Righting & Landing Pre-Alignment ─────────
-			// Deflect off walls while airborne so grazing a wall in the air doesn't stall the vehicle
-			if (wallContactCount > 0 && wallContactNormal.sqrMagnitude > 0.001f) {
-				Vector3 avgWallNormal = wallContactNormal.normalized;
-				float wallDot = Vector3.Dot(velocity, avgWallNormal);
-				if (wallDot < 0f) {
-					velocity -= avgWallNormal * wallDot;
-					if (wallBounceImpulse > 0f) {
-						velocity += avgWallNormal * wallBounceImpulse;
-					}
-					if (wallSpeedPenalty > 0f) {
-						float penalty = Mathf.Clamp01((wallSpeedPenalty / 100f) * Time.fixedDeltaTime);
-						velocity *= (1f - penalty);
-					}
-					body.linearVelocity = velocity;
-				}
-			}
-
 			_statDownforce    = 0f;
 			_driftAngle       = 0f;
 			_driftChargeTimer = 0f;
@@ -1289,8 +1192,6 @@ public class MovingCar : NetworkBehaviour {
 	void ClearState () {
 		groundContactCount    = 0;
 		contactNormal         = Vector3.zero;
-		wallContactCount      = 0;
-		wallContactNormal     = Vector3.zero;
 		_surfaceSampleCount   = 0;
 		_accumFriction        = 0f;
 		_accumSpeedMultiplier = 0f;
@@ -1391,9 +1292,6 @@ public class MovingCar : NetworkBehaviour {
 					SampleSurface(collision.gameObject, contact.point, -1);
 					sampled = true;
 				}
-			} else {
-				wallContactCount  += 1;
-				wallContactNormal += normal;
 			}
 		}
 	}
