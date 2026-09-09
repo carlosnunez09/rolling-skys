@@ -40,7 +40,7 @@ public class InGameEscMenu : MonoBehaviour {
 
     void Awake () {
         if (Instance != null && Instance != this) {
-            Destroy(gameObject);
+            Destroy(this);
             return;
         }
         Instance = this;
@@ -247,8 +247,13 @@ public class InGameEscMenu : MonoBehaviour {
             Transform menuTransform = transform.Find("EscMenu") ?? transform.Find("PauseMenu");
             if (menuTransform != null)
                 _menuRoot = menuTransform.gameObject;
-            else if (gameObject.name == "EscMenu" || gameObject.name == "PauseMenu")
+            else if ((gameObject.name == "EscMenu" || gameObject.name == "PauseMenu") && GetComponent<Canvas>() == null)
                 _menuRoot = gameObject;
+        }
+
+        // Safeguard: Never allow the root Canvas to be treated as the menu root
+        if (_menuRoot != null && _menuRoot.GetComponent<Canvas>() != null) {
+            _menuRoot = null;
         }
 
         if (_menuRoot == null) return;

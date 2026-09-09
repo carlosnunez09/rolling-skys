@@ -48,6 +48,7 @@
 # Claude Code / Codex memory
 .claude/
 .codex/
+.screenshots/
 
 # Local builds
 wbuilds/

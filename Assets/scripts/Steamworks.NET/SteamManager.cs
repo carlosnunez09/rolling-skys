@@ -165,12 +165,16 @@ public class SteamManager : MonoBehaviour {
 	}
 
 	protected virtual void Update() {
-		if (!m_bInitialized) {
+		if (!m_bInitialized || !CallbackDispatcher.IsInitialized) {
 			return;
 		}
 
-		// Run Steam client callbacks
-		SteamAPI.RunCallbacks();
+		try {
+			// Run Steam client callbacks
+			SteamAPI.RunCallbacks();
+		} catch (System.InvalidOperationException) {
+			// Callback dispatcher was shut down or invalidated
+		}
 	}
 #else
 	public static bool Initialized {

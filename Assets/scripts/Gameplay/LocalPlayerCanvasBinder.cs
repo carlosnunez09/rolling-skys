@@ -50,11 +50,6 @@ public class LocalPlayerCanvasBinder : MonoBehaviour {
         _huds = GetComponentsInChildren<CarHUD>(includeInactiveUi);
         _minimaps = GetComponentsInChildren<minimap>(includeInactiveUi);
 
-        if (_escMenus == null || _escMenus.Length == 0) {
-            InGameEscMenu escMenu = GetComponentInChildren<InGameEscMenu>(includeInactiveUi);
-            if (escMenu == null)
-                escMenu = gameObject.AddComponent<InGameEscMenu>();
-        }
         _escMenus = GetComponentsInChildren<InGameEscMenu>(includeInactiveUi);
     }
 
