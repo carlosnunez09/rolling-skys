@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
@@ -29,7 +29,7 @@ public class SteamBuildPostprocessor : IPostprocessBuildWithReport {
 
         // If building Linux Standalone Player (Steam Deck / SteamOS), generate launcher script
         if (report.summary.platform == BuildTarget.StandaloneLinux64 &&
-            report.summary.subtarget == (int)StandaloneBuildSubtarget.Player) {
+            EditorUserBuildSettings.standaloneBuildSubtarget != StandaloneBuildSubtarget.Server) {
             string binaryName = Path.GetFileName(outputPath);
             EnsureLinuxLaunchScript(outputDir, binaryName);
         }
@@ -59,9 +59,18 @@ public class SteamBuildPostprocessor : IPostprocessBuildWithReport {
                 "#!/usr/bin/env bash\n" +
                 "# Rolling Skys - Linux / Steam Deck Launch Script\n" +
                 "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n" +
-                "cd \"$SCRIPT_DIR\"\n" +
-                "chmod +x \"./" + binaryName + "\"\n" +
-                "exec \"./" + binaryName + "\" \"$@\"\n";
+                "cd \"$SCRIPT_DIR\"\n\n" +
+                "EXE=\"./" + binaryName + "\"\n" +
+                "if [ ! -f \"$EXE\" ]; then\n" +
+                "    EXE=$(find . -maxdepth 1 -name \"*.x86_64\" -print -quit)\n" +
+                "fi\n\n" +
+                "if [ -n \"$EXE\" ] && [ -f \"$EXE\" ]; then\n" +
+                "    chmod +x \"$EXE\"\n" +
+                "    exec \"$EXE\" \"$@\"\n" +
+                "else\n" +
+                "    echo \"[Error] Could not find Linux executable in $SCRIPT_DIR\"\n" +
+                "    exit 1\n" +
+                "fi\n";
 
             File.WriteAllText(scriptPath, scriptContent);
             Debug.Log($"[SteamBuildPostprocessor] Generated run_steamdeck.sh at: {scriptPath}");
