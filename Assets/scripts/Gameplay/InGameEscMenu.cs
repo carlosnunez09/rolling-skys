@@ -142,7 +142,14 @@ public class InGameEscMenu : MonoBehaviour {
     public void OnInviteClicked () {
         if (SteamLobbyManager.Instance != null && SteamLobbyManager.Instance.IsInLobby) {
             Debug.Log("[InGameEscMenu] Opening Steam invite overlay for lobby...");
-            SteamLobbyManager.Instance.OpenInviteOverlay();
+            string inviteUrl = SteamLobbyManager.Instance.OpenInviteOverlay();
+            if (_sessionStatusText != null) {
+                if (Application.isEditor) {
+                    _sessionStatusText.text = "<color=#62B0E8>Invite Link Copied to Clipboard!</color>\n<size=12>(Steam Overlay requires standalone build)</size>";
+                } else {
+                    _sessionStatusText.text = "<color=#62B0E8>Steam Overlay Opened! (Invite link copied)</color>";
+                }
+            }
         } else if (SteamManager.Initialized) {
             Debug.Log("[InGameEscMenu] Not currently in a Steam lobby. Hosting a friend lobby now...");
             if (_sessionStatusText != null)
@@ -221,7 +228,12 @@ public class InGameEscMenu : MonoBehaviour {
 
         if (steamReady) {
             _inviteButton.interactable = true;
-            if (_inviteButtonText != null) _inviteButtonText.text = "Host Steam Lobby & Invite";
+            if (_inviteButtonText != null) {
+                if (SteamLobbyManager.Instance != null && SteamLobbyManager.Instance.IsInLobby)
+                    _inviteButtonText.text = "Invite Friends (Steam)";
+                else
+                    _inviteButtonText.text = "Host Steam Lobby & Invite";
+            }
         } else {
             _inviteButton.interactable = false;
             if (_inviteButtonText != null) _inviteButtonText.text = "Steam Offline";

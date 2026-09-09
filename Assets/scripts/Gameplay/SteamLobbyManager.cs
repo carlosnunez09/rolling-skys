@@ -104,18 +104,27 @@ public class SteamLobbyManager : MonoBehaviour {
         OnMemberCountChanged?.Invoke(0);
     }
 
-    /// <summary>Open the Steam overlay friends invite dialog for this lobby.</summary>
-    public void OpenInviteOverlay() {
+    /// <summary>Open the Steam overlay friends invite dialog for this lobby and copy join link to clipboard.</summary>
+    public string OpenInviteOverlay() {
         if (!SteamManager.Initialized) {
             Debug.LogWarning("[SteamLobbyManager] Steam not initialized.");
-            return;
+            return null;
         }
 
         if (IsInLobby) {
             Debug.Log($"[SteamLobbyManager] Opening Steam invite overlay for lobby {CurrentLobbyID.m_SteamID}.");
             SteamFriends.ActivateGameOverlayInviteDialog(CurrentLobbyID);
+
+            string inviteUrl = $"steam://joinlobby/{SteamUtils.GetAppID().m_AppId}/{CurrentLobbyID.m_SteamID}/{SteamUser.GetSteamID().m_SteamID}";
+            GUIUtility.systemCopyBuffer = inviteUrl;
+            Debug.Log($"[SteamLobbyManager] Copied Steam invite URL to clipboard: {inviteUrl}");
+            if (Application.isEditor) {
+                Debug.Log("[SteamLobbyManager] Note: The Steam Overlay only renders in standalone builds (Windows / Linux / Steam Deck). Friends can paste the copied URL to join directly!");
+            }
+            return inviteUrl;
         } else {
             Debug.LogWarning("[SteamLobbyManager] Cannot invite: not in a lobby.");
+            return null;
         }
     }
 
