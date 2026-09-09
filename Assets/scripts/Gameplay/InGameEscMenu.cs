@@ -66,9 +66,16 @@ public class InGameEscMenu : MonoBehaviour {
     }
 
     void Update () {
-        // Toggle menu via Keyboard Escape or Gamepad Start
-        bool escPressed = Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
-        bool startPressed = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
+        // Toggle menu via Keyboard Escape/Tab/P or Gamepad Start/Select
+        bool escPressed = Keyboard.current != null && (
+            Keyboard.current.escapeKey.wasPressedThisFrame ||
+            Keyboard.current.tabKey.wasPressedThisFrame ||
+            Keyboard.current.pKey.wasPressedThisFrame
+        );
+        bool startPressed = Gamepad.current != null && (
+            Gamepad.current.startButton.wasPressedThisFrame ||
+            Gamepad.current.selectButton.wasPressedThisFrame
+        );
 
         if (escPressed || startPressed) {
             ToggleMenu();
