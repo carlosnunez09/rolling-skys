@@ -35,6 +35,13 @@ jobs:
             customParameters: ""
             runner: ubuntu-latest
             runAsHostUser: false
+          - name: Linux Client (Steam Deck)
+            targetPlatform: StandaloneLinux64
+            buildName: rolling-skys-linux
+            artifactName: rolling-skys-linux-client
+            customParameters: ""
+            runner: ubuntu-latest
+            runAsHostUser: false
           - name: Linux Server
             targetPlatform: StandaloneLinux64
             buildName: rolling-skys-linux-server
@@ -167,6 +174,7 @@ jobs:
             Download one of the build zip files below.
 
             - Windows client: `rolling-skys-windows-exe-${{ github.ref_name }}.zip`
+            - Linux / Steam Deck client: `rolling-skys-linux-client-${{ github.ref_name }}.zip`
             - Linux server: `rolling-skys-linux-server-${{ github.ref_name }}.zip`
 
             GitHub also shows automatic "Source code" archives on every release. Those are not the playable game builds.

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -35,11 +36,13 @@ jobs:
             exit 0
           fi
 
-          first_line="$(printf '%s' "$COMMIT_MESSAGE" | sed -n '1p')"
-          feat_pattern='^feat($|[(:])'
-          if [[ ! "$first_line" =~ $feat_pattern ]]; then
-            echo "Latest commit is not a feat commit: $first_line"
-            exit 0
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            first_line="$(printf '%s' "$COMMIT_MESSAGE" | sed -n '1p')"
+            release_pattern='^(feat|fix|perf|build|refactor)($|[(:])'
+            if [[ ! "$first_line" =~ $release_pattern ]]; then
+              echo "Latest commit does not match release pattern (feat|fix|perf|build|refactor): $first_line"
+              exit 0
+            fi
           fi
 
           git fetch --tags --force
