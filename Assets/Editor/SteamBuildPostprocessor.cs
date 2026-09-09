@@ -24,8 +24,10 @@ public class SteamBuildPostprocessor : IPostprocessBuildWithReport {
             return;
         }
 
-        // Copy steam_appid.txt so Steamworks initializes in standalone builds
-        EnsureSteamAppId(outputDir);
+        // Copy steam_appid.txt so Steamworks initializes in standalone client builds
+        if (EditorUserBuildSettings.standaloneBuildSubtarget != StandaloneBuildSubtarget.Server) {
+            EnsureSteamAppId(outputDir);
+        }
 
         // If building Linux Standalone Player (Steam Deck / SteamOS), generate launcher script
         if (report.summary.platform == BuildTarget.StandaloneLinux64 &&
