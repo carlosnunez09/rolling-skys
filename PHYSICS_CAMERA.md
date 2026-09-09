@@ -1,8 +1,8 @@
-# Physics and camera changes
+# Physics and camera
 
 The vehicle remains an arcade controller: custom gravity, surface grip, drift charging,
-air steering and boost pads retain their existing tuning. This pass corrects stability
-and collision problems rather than replacing the driving model.
+air steering and boost pads retain their existing tuning. Physics notes below are the
+current driving-model contract; camera notes describe the follow-camera rewrite.
 
 ## Vehicle and gravity
 
@@ -22,26 +22,51 @@ and collision problems rather than replacing the driving model.
 - Boost pads only drive the locally controlled car. Their prediction no longer adds
   world gravity in regions where the driving controller experiences zero gravity.
 
-## Camera settings
+## Camera architecture
 
-Both orbit cameras use a shared sphere sweep that encloses the near-plane corners.
-It ignores triggers and the followed car, contracts immediately at obstacles, and
-returns outward gradually. Crowded casts fall back to a complete query.
+Gameplay follow, idle/cinematic orbit, and the unused showcase camera share one pose
+path. Do not stack `OrbitCamera` and `CinematicOrbitCamera` on the same GameObject.
 
-On `OrbitCamera`, under **Distance**:
+```
+LateUpdate (after interpolated rigidbodies)
+  CameraFollowTarget        local owner, else unspawned Solo Practice car
+  CameraGravityAlignment    CustomGravity up at the lagged pivot
+  CameraFocusTracker        lag radius, 1.5 m cap, snap if a wall splits the lag
+  yaw / pitch / cinematic   driving-only or showcase-only intent
+  FollowCameraPose          smooth rotation, then obstruction boom + cutaway
+```
+
+| Type | Role |
+| --- | --- |
+| `OrbitCamera` | Driving camera in SampleScene / Main Camera. Speed pitch, auto-yaw, idle and `SetCinematicMode` used by `RaceRuntime`, `TutorialManager`, and `DevPlaytestManager`. |
+| `CinematicOrbitCamera` | Showcase / photo-mode only (FOV, zoom, pause). Same boom and lag rules. Gameplay cinematics stay on `OrbitCamera`. |
+| `FollowCameraPose` | Single apply step: rotation first, then sphere-cast boom, then `CameraOcclusionFade`. |
+| `CameraObstructionSolver` | Near-plane sphere sweep. Ignores triggers and the followed car. Contracts immediately, recovers with **Collision Recovery Speed**. Crowded hits fall back to `SphereCastAll`. |
+| `CameraOcclusionFade` | Per-camera toon cutaway globals. Added at runtime by `FollowCameraPose.Bind`. |
+
+### Wiring
+
+- `MovingCar` / `LocalPlayerCanvasBinder` call `RaceRuntime.SetPlayerCar`, which calls `OrbitCamera.SetFocus`.
+- If the inspector focus is empty, `OrbitCamera` auto-finds `MovingCar.HasLocalControl`, then an unspawned offline car. Networked replicas are never followed.
+- Pose runs in `LateUpdate` so it sees interpolated `Rigidbody` poses. Look centering and manual yaw use unscaled time; cinematic orbit and boom recovery use scaled time.
+
+### Distance (both cameras)
 
 - **Collision Recovery Speed**: default 4; higher values restore distance faster.
-- **Minimum Comfort Distance**: default 3 metres. This is permitted through supported
-  toon obstacles only; unsupported obstacles retain hard camera collision.
+- **Minimum Comfort Distance**: default 3 metres. Permitted through supported toon
+  obstacles only; unsupported obstacles retain hard camera collision.
 - **Reveal Through Toon Objects**: enables the cutaway. Disable for collision-only behavior.
 
-The camera's tracking lag is capped at 1.5 metres and resets when a wall separates the
-tracking pivot from the car. Idle orbiting stops while obstructed. Pitch limits are
-applied after pitch updates, and target assignment respects arbitrary gravity.
+Tracking lag is capped at 1.5 metres and resets when a wall separates the pivot from
+the car. Idle orbiting on `OrbitCamera` stops while the boom is obstructed. Pitch
+limits are applied after pitch updates. Target assignment respects arbitrary gravity.
 
-`CameraOcclusionFade` is added at runtime. Its **Reveal Radius** (default 1.4 metres)
-and **Edge Softness** (default 0.35) control the opening. Add it to the camera in Edit
-mode if you want to serialize different values.
+`CameraOcclusionFade` **Reveal Radius** (default 1.4 metres) and **Edge Softness**
+(default 0.35) control the opening. Add the component in Edit mode to serialize
+different values.
+
+Cinematic toggle is **C** / **D-Pad Up** (`GameAction.CinematicCamera`). Gamepad
+Select is not bound here so it does not fight respawn or the playtest menu.
 
 ## Toon cutaway
 
@@ -62,15 +87,14 @@ and compatible materials in every slot. Unsupported geometry still uses hard col
 
 ## Verification
 
-Run **Tools > Rolling Skys > Check Physics and Camera** in Edit mode for 20 regression
-checks (grip, braking, gravity, collision filtering, crowded casts and shader compilation).
-The checks create and remove temporary objects in an additive scene.
+Run **Tools > Rolling Skys > Check Physics and Camera** in Edit mode for 22 regression
+checks (grip, braking, gravity, collision filtering, focus lag, crowded casts and
+shader compilation). The checks create and remove temporary objects in an additive scene.
 
 `PhysicsCameraChecks.RenderCutawayCheck()` renders an obstructed toon target with and
 without the opening and verifies that the target becomes visible and camera globals
 are restored. Preview images are written to `Temp/CameraChecks`.
 
-A six-second live scene smoke check exercised acceleration, turning, braking and
-coasting: peak speed 21.30 m/s, displacement 45.60 m, finite velocity throughout.
-No full race, multiplayer session, or exhaustive track traversal was completed.
-Driving feel on individual tracks still needs hands-on tuning.
+Play **Solo Practice** or **SampleScene** and confirm the follow camera locks onto the
+local car, contracts at walls, and restores distance after the obstacle. Toggle
+cinematic with C / D-Pad Up; countdown and finish still call `SetCinematicMode`.

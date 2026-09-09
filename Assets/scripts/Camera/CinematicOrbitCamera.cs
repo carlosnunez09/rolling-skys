@@ -1,20 +1,14 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 using NaughtyAttributes;
 
 /// <summary>
-/// Dedicated cinematic orbit camera designed for vehicle showcases, track panoramas,
-/// intro countdown sequences, victory screens, and photo mode in Rolling Skys.
+/// Dedicated showcase / photo-mode orbit. Gameplay sequences (countdown, finish,
+/// tutorial, idle) use <see cref="OrbitCamera.SetCinematicMode"/> on the driving
+/// camera — do not stack this component on the same GameObject as
+/// <see cref="OrbitCamera"/>.
 ///
-/// Features:
-///  - Arbitrary & spherical gravity alignment via CustomGravity (works seamlessly on planets, walls, loops, and ceilings).
-///  - Continuous smooth panoramic orbiting with adjustable speed and direction.
-///  - Sinusoidal elevation tilt wave (dynamic drone / crane sweep).
-///  - Distance breathing (subtle dolly zoom / breathing effect).
-///  - Smooth target tracking with configurable lag radius and centering damping.
-///  - Obstruction avoidance with camera near-plane box casting to prevent clipping into terrain.
-///  - Optional cinematic telephoto FOV easing.
-///  - Optional interactive manual rotation and zoom override.
+/// Shares gravity, focus lag, local-player binding, and the obstruction/cutaway
+/// boom with the driving camera via <see cref="FollowCameraPose"/>.
 /// </summary>
 [RequireComponent(typeof(Camera))]
 public class CinematicOrbitCamera : MonoBehaviour {
@@ -86,8 +80,19 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	[BoxGroup("Occlusion"), SerializeField]
 	LayerMask obstructionMask = -1;
 
-    readonly CameraObstructionSolver obstructionSolver = new CameraObstructionSolver();
-    CameraOcclusionFade occlusionFade;
+	[BoxGroup("Occlusion"), SerializeField, Min(0.1f)]
+	float collisionRecoverySpeed = 4f;
+
+	[BoxGroup("Occlusion"), SerializeField, Min(0.5f)]
+	float minimumComfortDistance = 3f;
+
+	[BoxGroup("Occlusion"), SerializeField]
+	bool revealThroughToonObjects = true;
+
+	readonly FollowCameraPose pose = new FollowCameraPose();
+	readonly CameraFocusTracker focusTracker = new CameraFocusTracker();
+	CameraGravityAlignment gravityAlignment;
+	CameraLookInput lookInput;
 
 	// ── Interactive Controls ───────────────────────────────────────────
 
@@ -100,230 +105,150 @@ public class CinematicOrbitCamera : MonoBehaviour {
 	[BoxGroup("Interactive"), SerializeField, Range(1f, 20f), Label("Zoom Speed  m/s")]
 	float zoomSpeed = 6f;
 
-	// ── Runtime State ──────────────────────────────────────────────────
-
 	Camera targetCamera;
-	Vector3 focusPoint;
 	Vector2 orbitAngles = new Vector2(18f, 0f);
 	float waveTimer;
 	float currentDistance;
 	float defaultFOV;
 	bool isPaused;
-	Quaternion gravityAlignment = Quaternion.identity;
-
-	InputAction lookAction;
-	InputAction zoomAction;
-
-
 
 	public Transform Target => target;
 	public float CurrentOrbitAngle => orbitAngles.y;
 	public bool IsPaused => isPaused;
 
 	void Awake () {
+		gravityAlignment.Identity();
 		targetCamera = GetComponent<Camera>();
-        occlusionFade = GetComponent<CameraOcclusionFade>();
-        if (occlusionFade == null) occlusionFade = gameObject.AddComponent<CameraOcclusionFade>();
-		if (targetCamera != null) {
+		pose.Bind(gameObject);
+		if (targetCamera != null)
 			defaultFOV = targetCamera.fieldOfView;
-		}
 
 		currentDistance = distance;
 		orbitAngles.x = baseElevationAngle;
-
-		lookAction = new InputAction("CinematicLook", InputActionType.Value);
-		lookAction.AddCompositeBinding("2DVector")
-			.With("Up",    "<Keyboard>/upArrow")
-			.With("Down",  "<Keyboard>/downArrow")
-			.With("Left",  "<Keyboard>/leftArrow")
-			.With("Right", "<Keyboard>/rightArrow");
-		lookAction.AddBinding("<Gamepad>/rightStick");
-
-		zoomAction = new InputAction("CinematicZoom", InputActionType.Value);
-		zoomAction.AddBinding("<Mouse>/scroll/y");
-		zoomAction.AddCompositeBinding("1DAxis")
-			.With("Positive", "<Gamepad>/rightTrigger")
-			.With("Negative", "<Gamepad>/leftTrigger");
+		lookInput = CameraLookInput.CreateCinematic();
 
 		if (target != null)
 			SetTarget(target);
 	}
 
 	void OnEnable () {
-		lookAction?.Enable();
-		zoomAction?.Enable();
+		OrbitCamera driving = GetComponent<OrbitCamera>();
+		if (driving != null && driving.enabled) {
+			Debug.LogWarning(
+				"CinematicOrbitCamera is on the same GameObject as OrbitCamera; disabling the showcase camera. Use OrbitCamera.SetCinematicMode for gameplay cinematics.",
+				this);
+			enabled = false;
+			return;
+		}
+
+		lookInput?.Enable();
+		pose.SetFadeEnabled(revealThroughToonObjects);
 	}
 
 	void OnDisable () {
-        if (occlusionFade != null) occlusionFade.enabled = false;
-		lookAction?.Disable();
-		zoomAction?.Disable();
+		pose.SetFadeEnabled(false);
+		lookInput?.Disable();
 	}
 
 	void OnDestroy () {
-		lookAction?.Dispose();
-		zoomAction?.Dispose();
+		lookInput?.Dispose();
 	}
 
 	void LateUpdate () {
-		if (target == null && autoFindPlayer)
-			TryFindPlayerTarget();
+		if (target == null && autoFindPlayer) {
+			Transform found = CameraFollowTarget.FindLocalFocus();
+			if (found != null)
+				SetTarget(found);
+		}
 
 		if (target == null) {
-            occlusionFade.SetTarget(null, Vector3.zero);
-            return;
-        }
+			pose.ClearTarget();
+			return;
+		}
 
 		UpdateGravityAlignment();
-		UpdateFocusPoint();
+		Vector3 worldOffset = gravityAlignment.Rotation * targetOffset;
+		focusTracker.Update(target.position + worldOffset, focusLagRadius, focusCentering,
+			pose.Obstruction, target, obstructionMask);
 		UpdateOrbitMovement();
 		UpdateFOV();
 
-		// Calculate desired orientation and position
-		Quaternion orbitRotation = Quaternion.Euler(orbitAngles.x, orbitAngles.y, 0f);
-		Quaternion lookRotation  = gravityAlignment * orbitRotation;
-
-		Quaternion smoothedRotation = Quaternion.Slerp(
-			transform.rotation, lookRotation,
-			1f - Mathf.Exp(-rotationSmoothSpeed * Time.deltaTime));
-
-		Vector3 lookDirection = smoothedRotation * Vector3.forward;
-		Vector3 lookPosition  = focusPoint - lookDirection * currentDistance;
-
-        lookPosition = obstructionSolver.Resolve(targetCamera, target, focusPoint, -lookDirection,
-            currentDistance, obstructionMask, 4f, 3f, true);
-        occlusionFade.enabled = true;
-        occlusionFade.SetTarget(target, target.position);
-
-		transform.SetPositionAndRotation(lookPosition, smoothedRotation);
+		Quaternion lookRotation = gravityAlignment.Rotation * Quaternion.Euler(orbitAngles.x, orbitAngles.y, 0f);
+		pose.Apply(transform, targetCamera, target, focusTracker.Point,
+			lookRotation, currentDistance, rotationSmoothSpeed,
+			obstructionMask, collisionRecoverySpeed, minimumComfortDistance, revealThroughToonObjects);
 	}
 
 	void UpdateOrbitMovement () {
 		if (!isPaused) {
-			// Continuous panoramic orbit at slow, calm speed
 			orbitAngles.y += orbitSpeed * Time.deltaTime;
-			if (orbitAngles.y >= 360f) orbitAngles.y -= 360f;
-			else if (orbitAngles.y < 0f) orbitAngles.y += 360f;
+			CameraOrbitAngles.WrapYaw(ref orbitAngles);
 
-			// Optional elevation wave (only if amplitude > 0)
 			if (elevationWaveAmplitude > 0f) {
 				waveTimer += Time.deltaTime;
-				float targetElevation = baseElevationAngle + Mathf.Sin(waveTimer * elevationWaveFrequency * Mathf.PI * 2f) * elevationWaveAmplitude;
+				float targetElevation = baseElevationAngle
+					+ Mathf.Sin(waveTimer * elevationWaveFrequency * Mathf.PI * 2f) * elevationWaveAmplitude;
 				orbitAngles.x = Mathf.Lerp(orbitAngles.x, targetElevation, 4f * Time.deltaTime);
 			} else {
 				orbitAngles.x = baseElevationAngle;
 			}
 
-			// Optional distance breathing (only if amplitude > 0)
 			if (distanceBreathAmplitude > 0f) {
-				float targetDist = distance + Mathf.Cos(waveTimer * distanceBreathFrequency * Mathf.PI * 2f) * distanceBreathAmplitude;
+				float targetDist = distance
+					+ Mathf.Cos(waveTimer * distanceBreathFrequency * Mathf.PI * 2f) * distanceBreathAmplitude;
 				currentDistance = Mathf.Lerp(currentDistance, targetDist, 3f * Time.deltaTime);
 			} else {
 				currentDistance = distance;
 			}
 		}
 
-		// Optional interactive look / zoom override
-		if (allowInteractiveControl) {
-			Vector2 look = lookAction.ReadValue<Vector2>();
-			if (Mathf.Abs(look.x) > 0.01f) {
-				orbitAngles.y += look.x * manualRotateSpeed * Time.unscaledDeltaTime;
-			}
-			if (Mathf.Abs(look.y) > 0.01f) {
-				orbitAngles.x = Mathf.Clamp(orbitAngles.x - look.y * manualRotateSpeed * 0.5f * Time.unscaledDeltaTime, 0f, 85f);
-			}
+		if (!allowInteractiveControl || lookInput == null)
+			return;
 
-			float zoomVal = zoomAction.ReadValue<float>();
-			if (Mathf.Abs(zoomVal) > 0.01f) {
-				distance = Mathf.Clamp(distance - Mathf.Sign(zoomVal) * zoomSpeed * Time.unscaledDeltaTime, 2f, 50f);
-			}
-		}
-	}
+		Vector2 look = lookInput.ReadLook();
+		if (Mathf.Abs(look.x) > 0.01f)
+			orbitAngles.y += look.x * manualRotateSpeed * Time.unscaledDeltaTime;
+		if (Mathf.Abs(look.y) > 0.01f)
+			orbitAngles.x = Mathf.Clamp(orbitAngles.x - look.y * manualRotateSpeed * 0.5f * Time.unscaledDeltaTime, 0f, 85f);
 
-	void UpdateFocusPoint () {
-		Vector3 worldOffset = gravityAlignment * targetOffset;
-		Vector3 targetPoint = target.position + worldOffset;
-
-		if (focusLagRadius > 0f) {
-			float dist = Vector3.Distance(targetPoint, focusPoint);
-			float t = 1f;
-			if (dist > 0.01f && focusCentering > 0f)
-				t = Mathf.Pow(1f - focusCentering, Time.unscaledDeltaTime);
-			if (dist > focusLagRadius)
-				t = Mathf.Min(t, focusLagRadius / dist);
-			focusPoint = Vector3.Lerp(targetPoint, focusPoint, t);
-		} else {
-			focusPoint = targetPoint;
-		}
+		float zoomVal = lookInput.ReadZoom();
+		if (Mathf.Abs(zoomVal) > 0.01f)
+			distance = Mathf.Clamp(distance - Mathf.Sign(zoomVal) * zoomSpeed * Time.unscaledDeltaTime, 2f, 50f);
 	}
 
 	void UpdateGravityAlignment () {
 		if (!useGravityAlignment) {
-			gravityAlignment = Quaternion.identity;
+			gravityAlignment.Identity();
 			return;
 		}
 
-		Vector3 fromUp = gravityAlignment * Vector3.up;
-		Vector3 toUp   = CustomGravity.GetUpAxis(focusPoint);
-
-		if (toUp.sqrMagnitude < 0.001f) return;
-
-		float dot      = Mathf.Clamp(Vector3.Dot(fromUp, toUp), -1f, 1f);
-		float angle    = Mathf.Acos(dot) * Mathf.Rad2Deg;
-		float maxAngle = upAlignmentSpeed * Time.deltaTime;
-
-		Quaternion newAlignment = Quaternion.FromToRotation(fromUp, toUp) * gravityAlignment;
-		if (float.IsNaN(newAlignment.x) || float.IsNaN(newAlignment.y) ||
-		    float.IsNaN(newAlignment.z) || float.IsNaN(newAlignment.w)) return;
-
-		gravityAlignment = angle <= maxAngle
-			? newAlignment
-			: Quaternion.SlerpUnclamped(gravityAlignment, newAlignment, maxAngle / angle);
+		gravityAlignment.Update(focusTracker.Point, upAlignmentSpeed, Time.deltaTime);
 	}
 
 	void UpdateFOV () {
 		if (targetCamera == null) return;
-
 		float targetFov = applyCinematicFOV ? cinematicFOV : defaultFOV;
 		targetCamera.fieldOfView = Mathf.Lerp(targetCamera.fieldOfView, targetFov, fovSmoothSpeed * Time.deltaTime);
 	}
 
-	void TryFindPlayerTarget () {
-		var cars = FindObjectsByType<MovingCar>(FindObjectsInactive.Exclude);
-		foreach (MovingCar car in cars) {
-			if (car != null && car.HasLocalControl) {
-				SetTarget(car.transform);
-				return;
-			}
-		}
-		foreach (MovingCar car in cars) {
-			if (car != null && !car.IsSpawned) {
-				SetTarget(car.transform);
-				return;
-			}
-		}
-	}
-
-	// ── Public API ─────────────────────────────────────────────────────
-
 	public void SetTarget (Transform newTarget) {
 		if (newTarget == null) return;
 		target = newTarget;
-        obstructionSolver.Reset();
-		focusPoint = target.position + (gravityAlignment * targetOffset);
+		pose.ResetBoom();
 
-		if (useGravityAlignment) {
-			Vector3 startUp = CustomGravity.GetUpAxis(focusPoint);
-			gravityAlignment = startUp.sqrMagnitude > 0.001f
-				? Quaternion.FromToRotation(Vector3.up, startUp)
-				: Quaternion.identity;
-		}
+		Vector3 start = target.position + gravityAlignment.Rotation * targetOffset;
+		if (useGravityAlignment)
+			gravityAlignment.SnapAt(start);
+		else
+			gravityAlignment.Identity();
+
+		focusTracker.Snap(start);
 	}
 
-	public void SetOrbitSpeed (float speed)       => orbitSpeed = speed;
-	public void SetDistance (float newDistance)   => distance = Mathf.Max(newDistance, 1f);
-	public void SetElevation (float angle)        => baseElevationAngle = Mathf.Clamp(angle, 0f, 85f);
-	public void PauseOrbit ()                     => isPaused = true;
-	public void ResumeOrbit ()                    => isPaused = false;
-	public void TogglePause ()                    => isPaused = !isPaused;
+	public void SetOrbitSpeed (float speed) => orbitSpeed = speed;
+	public void SetDistance (float newDistance) => distance = Mathf.Max(newDistance, 1f);
+	public void SetElevation (float angle) => baseElevationAngle = Mathf.Clamp(angle, 0f, 85f);
+	public void PauseOrbit () => isPaused = true;
+	public void ResumeOrbit () => isPaused = false;
+	public void TogglePause () => isPaused = !isPaused;
 }

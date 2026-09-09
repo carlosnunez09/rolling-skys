@@ -114,6 +114,19 @@ public static class PhysicsCameraChecks {
             Check(Vector3.Distance(origin, result) < 1.9f, "Unsupported walls retain hard collision");
             Check(solver.IsPathBlocked(origin, origin + Vector3.back * 5, target.transform, -1), "Lag pivot cannot cross walls");
 
+            var tracker = new CameraFocusTracker();
+            tracker.Snap(origin);
+            tracker.Update(origin + Vector3.right * 10f, 5f, 0.5f, null, null, 0);
+            Check(Vector3.Distance(origin + Vector3.right * 10f, tracker.Point) <= CameraFocusTracker.MaxLagMetres + 0.001f,
+                "Focus lag is capped at 1.5 metres");
+            GameObject lagWall = Make("Lag wall", origin + Vector3.right * 0.4f, scene, objects);
+            BoxCollider lagBox = lagWall.AddComponent<BoxCollider>();
+            lagBox.size = new Vector3(.2f, 4f, 4f);
+            Physics.SyncTransforms();
+            tracker.Snap(origin + Vector3.right * 5f);
+            tracker.Update(origin, 5f, 0f, solver, target.transform, -1);
+            Check(Vector3.Distance(tracker.Point, origin) < 0.01f, "Focus tracker resets when a wall splits the lag");
+
             Shader toon = AssetDatabase.LoadAssetAtPath<Shader>("Assets/Art/Toon/Shaders/toon.shader");
             var material = new Material(toon);
             objects.Add(material);

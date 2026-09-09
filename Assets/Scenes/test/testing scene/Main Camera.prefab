@@ -151,12 +151,31 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::OrbitCamera
   focus: {fileID: 0}
+  autoFindLocalPlayer: 1
   focusRadius: 5
   focusCentering: 0.5
+  focusHeightOffset: 0.75
   distance: 16.6
   obstructionMask:
     serializedVersion: 2
     m_Bits: 4294967295
+  collisionRecoverySpeed: 4
+  minimumComfortDistance: 3
+  revealThroughToonObjects: 1
+  enableCinematicOrbit: 1
+  autoCinematicWhenIdle: 1
+  idleTimeToCinematic: 4
+  exitCinematicOnMove: 1
+  allowKeyToggle: 1
+  cinematicOrbitSpeed: 6
+  matchDrivingDistance: 1
+  cinematicDistance: 15
+  matchDrivingPitch: 1
+  cinematicBasePitch: 22
+  cinematicPitchWaveAmp: 0
+  cinematicWaveFrequency: 0.2
+  cinematicDistanceBreath: 0
+  cinematicTransitionSpeed: 1.5
   rotationSpeed: 90
   alignDelay: 0.5
   alignSmoothRange: 45
