@@ -243,8 +243,18 @@ public class MainMenuNetworkUI : MonoBehaviour {
                 }
             } else if (_disconnectButton != null && _disconnectButton.interactable && _disconnectButton.gameObject.activeInHierarchy) {
                 OnDisconnectClicked();
+            } else if (escPressed) {
+                QuitApplication();
             }
         }
+    }
+
+    void QuitApplication() {
+        Debug.Log("[MainMenuUI] Quitting application...");
+#if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+#endif
+        Application.Quit();
     }
 
     void HandleControllerFocus() {
@@ -385,7 +395,7 @@ public class MainMenuNetworkUI : MonoBehaviour {
         if (isPad) {
             _controllerHintText.text = "<color=#1FE0FF>🎮 Controller:</color> [D-Pad / Left Stick] Navigate   [A] Select   [B] Back / Disconnect";
         } else {
-            _controllerHintText.text = "<color=#8E9CAE>⌨ Keyboard:</color> [Arrows / WASD] Navigate   [Enter / Space] Select   [Esc] Cancel";
+            _controllerHintText.text = "<color=#8E9CAE>⌨ Keyboard:</color> [Arrows / WASD] Navigate   [Enter / Space] Select   [Esc] Cancel / Quit";
         }
     }
 }
