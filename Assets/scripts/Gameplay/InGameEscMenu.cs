@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -9,7 +10,7 @@ using UnityEngine.UI;
 /// <summary>
 /// In-game Escape/Pause menu. Supports keyboard Escape and Gamepad Start/Menu button.
 /// Allows players to invite friends via the Steam overlay, reset/respawn their car,
-/// or disconnect and return cleanly to the Main Menu.
+/// switch or clone car physics profiles on the fly, or disconnect and return cleanly to the Main Menu.
 /// </summary>
 public class InGameEscMenu : MonoBehaviour {
 
@@ -30,10 +31,23 @@ public class InGameEscMenu : MonoBehaviour {
     [SerializeField] Button _respawnButton;
     [SerializeField] Button _mainMenuButton;
 
+    [Header("Car Profile Controls")]
+    [SerializeField] Button _profileCycleButton;
+    [SerializeField] TMP_Text _profileButtonText;
+    [SerializeField] TMP_Text _profileInfoText;
+    [SerializeField] Button _addProfileButton;
+    [SerializeField] TMP_Text _addProfileButtonText;
+    [SerializeField] Button _configuratorButton;
+    [SerializeField] TMP_Text _configuratorButtonText;
+
     [Header("Footer")]
     [SerializeField] TMP_Text _hintText;
 
     MovingCar _boundCar;
+    readonly List<CarDataSO> _profiles = new List<CarDataSO>();
+    int _selectedProfileIndex = 0;
+    int _customProfileCounter = 1;
+    GameObject _lastSelectedMenuObject;
 
     /// <summary>True when the ESC menu is actively open on screen.</summary>
     public bool IsOpen => _menuRoot != null && _menuRoot.activeSelf;
@@ -56,6 +70,8 @@ public class InGameEscMenu : MonoBehaviour {
     void Start () {
         if (_boundCar == null)
             _boundCar = FindLocalPlayerCar();
+
+        InitializeProfiles();
     }
 
     void OnDestroy () {
@@ -66,16 +82,12 @@ public class InGameEscMenu : MonoBehaviour {
     }
 
     void Update () {
-        // Toggle menu via Keyboard Escape/Tab/P or Gamepad Start/Select
+        // Toggle menu via Keyboard Escape/P or Gamepad Start
         bool escPressed = Keyboard.current != null && (
             Keyboard.current.escapeKey.wasPressedThisFrame ||
-            Keyboard.current.tabKey.wasPressedThisFrame ||
             Keyboard.current.pKey.wasPressedThisFrame
         );
-        bool startPressed = Gamepad.current != null && (
-            Gamepad.current.startButton.wasPressedThisFrame ||
-            Gamepad.current.selectButton.wasPressedThisFrame
-        );
+        bool startPressed = Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame;
 
         if (escPressed || startPressed) {
             ToggleMenu();
@@ -83,7 +95,34 @@ public class InGameEscMenu : MonoBehaviour {
         }
 
         if (IsOpen) {
-            // Refresh session status while menu is visible
+            // Cancel / Resume with B button on controller
+            if (Gamepad.current != null && Gamepad.current.buttonEast.wasPressedThisFrame) {
+                CloseMenu();
+                return;
+            }
+
+            // Quick profile cycling with controller bumpers (LB / RB)
+            if (Gamepad.current != null) {
+                if (Gamepad.current.leftShoulder.wasPressedThisFrame) {
+                    PrevProfile();
+                } else if (Gamepad.current.rightShoulder.wasPressedThisFrame) {
+                    NextProfile();
+                }
+            }
+
+            // Quick profile cycling with D-Pad Left/Right or A/D if profile cycle button is selected
+            if (EventSystem.current != null && _profileCycleButton != null && EventSystem.current.currentSelectedGameObject == _profileCycleButton.gameObject) {
+                if (Gamepad.current != null) {
+                    if (Gamepad.current.dpad.left.wasPressedThisFrame) PrevProfile();
+                    else if (Gamepad.current.dpad.right.wasPressedThisFrame) NextProfile();
+                }
+                if (Keyboard.current != null) {
+                    if (Keyboard.current.leftArrowKey.wasPressedThisFrame || Keyboard.current.aKey.wasPressedThisFrame) PrevProfile();
+                    else if (Keyboard.current.rightArrowKey.wasPressedThisFrame || Keyboard.current.dKey.wasPressedThisFrame) NextProfile();
+                }
+            }
+
+            HandleMenuControllerFocus();
             RefreshSessionStatus();
         }
     }
@@ -92,6 +131,7 @@ public class InGameEscMenu : MonoBehaviour {
 
     public void BindToCar (MovingCar car) {
         _boundCar = car;
+        InitializeProfiles();
     }
 
     public void ToggleMenu () {
@@ -107,6 +147,9 @@ public class InGameEscMenu : MonoBehaviour {
             if (_menuRoot == null) return;
         }
 
+        EnsureProfileControlsExist();
+        InitializeProfiles();
+
         if (_boundCar == null)
             _boundCar = FindLocalPlayerCar();
 
@@ -119,10 +162,13 @@ public class InGameEscMenu : MonoBehaviour {
 
         _menuRoot.SetActive(true);
         RefreshSessionStatus();
+        UpdateProfileUi();
+        SetupButtonNavigation();
 
         // Focus resume button for gamepad / keyboard navigation
         if (EventSystem.current != null && _resumeButton != null) {
             EventSystem.current.SetSelectedGameObject(_resumeButton.gameObject);
+            _lastSelectedMenuObject = _resumeButton.gameObject;
         }
     }
 
@@ -289,6 +335,27 @@ public class InGameEscMenu : MonoBehaviour {
         if (_resumeButton == null)
             _resumeButton = FindChildButton(_menuRoot.transform, "ResumeButton");
 
+        if (_profileCycleButton == null)
+            _profileCycleButton = FindChildButton(_menuRoot.transform, "ProfileCycleButton") ?? FindChildButton(_menuRoot.transform, "ProfileButton");
+
+        if (_profileCycleButton != null && _profileButtonText == null)
+            _profileButtonText = _profileCycleButton.GetComponentInChildren<TMP_Text>(true);
+
+        if (_profileInfoText == null)
+            _profileInfoText = FindChildText(_menuRoot.transform, "ProfileInfoText");
+
+        if (_addProfileButton == null)
+            _addProfileButton = FindChildButton(_menuRoot.transform, "AddProfileButton") ?? FindChildButton(_menuRoot.transform, "NewProfileButton");
+
+        if (_addProfileButton != null && _addProfileButtonText == null)
+            _addProfileButtonText = _addProfileButton.GetComponentInChildren<TMP_Text>(true);
+
+        if (_configuratorButton == null)
+            _configuratorButton = FindChildButton(_menuRoot.transform, "ConfiguratorButton") ?? FindChildButton(_menuRoot.transform, "TuneCarButton");
+
+        if (_configuratorButton != null && _configuratorButtonText == null)
+            _configuratorButtonText = _configuratorButton.GetComponentInChildren<TMP_Text>(true);
+
         if (_inviteButton == null)
             _inviteButton = FindChildButton(_menuRoot.transform, "InviteButton");
 
@@ -307,6 +374,9 @@ public class InGameEscMenu : MonoBehaviour {
 
     void BindButtonEvents () {
         _resumeButton?.onClick.AddListener(OnResumeClicked);
+        _profileCycleButton?.onClick.AddListener(NextProfile);
+        _addProfileButton?.onClick.AddListener(AddNewProfile);
+        _configuratorButton?.onClick.AddListener(OpenConfigurator);
         _inviteButton?.onClick.AddListener(OnInviteClicked);
         _respawnButton?.onClick.AddListener(OnRespawnClicked);
         _mainMenuButton?.onClick.AddListener(OnMainMenuClicked);
@@ -314,9 +384,257 @@ public class InGameEscMenu : MonoBehaviour {
 
     void UnbindButtonEvents () {
         if (_resumeButton != null) _resumeButton.onClick.RemoveListener(OnResumeClicked);
+        if (_profileCycleButton != null) _profileCycleButton.onClick.RemoveListener(NextProfile);
+        if (_addProfileButton != null) _addProfileButton.onClick.RemoveListener(AddNewProfile);
+        if (_configuratorButton != null) _configuratorButton.onClick.RemoveListener(OpenConfigurator);
         if (_inviteButton != null) _inviteButton.onClick.RemoveListener(OnInviteClicked);
         if (_respawnButton != null) _respawnButton.onClick.RemoveListener(OnRespawnClicked);
         if (_mainMenuButton != null) _mainMenuButton.onClick.RemoveListener(OnMainMenuClicked);
+    }
+
+    // ── Car Profile System ─────────────────────────────────────────────────────
+
+    public void InitializeProfiles () {
+        if (_profiles.Count == 0) {
+            CarDataSO[] loaded = Resources.LoadAll<CarDataSO>("Cars");
+            if (loaded == null || loaded.Length == 0)
+                loaded = Resources.LoadAll<CarDataSO>("");
+
+            if (loaded != null) {
+                foreach (CarDataSO p in loaded) {
+                    if (p != null && !_profiles.Contains(p))
+                        _profiles.Add(p);
+                }
+            }
+        }
+
+        if (_boundCar == null)
+            _boundCar = FindLocalPlayerCar();
+
+        if (_boundCar != null && _boundCar.Profile != null) {
+            if (!_profiles.Contains(_boundCar.Profile))
+                _profiles.Insert(0, _boundCar.Profile);
+            _selectedProfileIndex = _profiles.IndexOf(_boundCar.Profile);
+        }
+
+        if (_profiles.Count == 0) {
+            CarDataSO def = ScriptableObject.CreateInstance<CarDataSO>();
+            def.name = "Standard Car";
+            def.profileName = "Standard Car";
+            _profiles.Add(def);
+        }
+
+        if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _profiles.Count)
+            _selectedProfileIndex = 0;
+
+        UpdateProfileUi();
+    }
+
+    public void NextProfile () {
+        if (_profiles.Count == 0) InitializeProfiles();
+        if (_profiles.Count == 0) return;
+
+        _selectedProfileIndex = (_selectedProfileIndex + 1) % _profiles.Count;
+        ApplySelectedProfile();
+    }
+
+    public void PrevProfile () {
+        if (_profiles.Count == 0) InitializeProfiles();
+        if (_profiles.Count == 0) return;
+
+        _selectedProfileIndex = (_selectedProfileIndex - 1 + _profiles.Count) % _profiles.Count;
+        ApplySelectedProfile();
+    }
+
+    public void ApplySelectedProfile () {
+        if (_boundCar == null)
+            _boundCar = FindLocalPlayerCar();
+
+        if (_selectedProfileIndex >= 0 && _selectedProfileIndex < _profiles.Count) {
+            CarDataSO profile = _profiles[_selectedProfileIndex];
+            if (_boundCar != null && profile != null) {
+                _boundCar.ApplyProfile(profile);
+            }
+        }
+
+        UpdateProfileUi();
+    }
+
+    public void AddNewProfile () {
+        if (_profiles.Count == 0) InitializeProfiles();
+
+        CarDataSO current = (_selectedProfileIndex >= 0 && _selectedProfileIndex < _profiles.Count)
+            ? _profiles[_selectedProfileIndex]
+            : (_boundCar != null ? _boundCar.Profile : null);
+
+        CarDataSO newProfile = current != null ? current.Clone() : ScriptableObject.CreateInstance<CarDataSO>();
+        string profileName = $"Custom Car {_customProfileCounter++}";
+        newProfile.name = profileName;
+        newProfile.profileName = profileName;
+        newProfile.description = $"Custom vehicle profile #{_customProfileCounter - 1} created during session.";
+
+        _profiles.Add(newProfile);
+        _selectedProfileIndex = _profiles.Count - 1;
+        ApplySelectedProfile();
+        SetupButtonNavigation();
+
+        if (_sessionStatusText != null) {
+            _sessionStatusText.text = $"<color=#2EB85C>Created & Applied:</color> {profileName}";
+        }
+    }
+
+    public void OpenConfigurator () {
+        if (_profiles.Count == 0) InitializeProfiles();
+        CarDataSO current = (_selectedProfileIndex >= 0 && _selectedProfileIndex < _profiles.Count)
+            ? _profiles[_selectedProfileIndex]
+            : (_boundCar != null ? _boundCar.Profile : null);
+
+        if (current == null) return;
+
+        // Hide ESC menu while configurator is open
+        if (_menuRoot != null)
+            _menuRoot.SetActive(false);
+
+        // Ensure CarConfiguratorUI instance exists in scene
+        if (CarConfiguratorUI.Instance == null) {
+            Canvas canvas = GetComponentInParent<Canvas>() ?? FindAnyObjectByType<Canvas>();
+            GameObject cfgObj = new GameObject("CarConfigurator", typeof(CarConfiguratorUI));
+            if (canvas != null) cfgObj.transform.SetParent(canvas.transform, false);
+        }
+
+        CarConfiguratorUI.Instance.Open(current, _boundCar, OnConfiguratorClosed);
+    }
+
+    void OnConfiguratorClosed () {
+        // Re-open ESC menu and update active profile UI
+        if (_menuRoot != null) {
+            _menuRoot.SetActive(true);
+            UpdateProfileUi();
+            SetupButtonNavigation();
+
+            if (EventSystem.current != null && _configuratorButton != null) {
+                EventSystem.current.SetSelectedGameObject(_configuratorButton.gameObject);
+                _lastSelectedMenuObject = _configuratorButton.gameObject;
+            }
+        }
+    }
+
+    void UpdateProfileUi () {
+        if (_profiles.Count == 0) return;
+        if (_selectedProfileIndex >= 0 && _selectedProfileIndex < _profiles.Count) {
+            CarDataSO active = _profiles[_selectedProfileIndex];
+            if (active == null) return;
+            string name = string.IsNullOrEmpty(active.profileName) ? active.name : active.profileName;
+            if (_profileButtonText != null) {
+                _profileButtonText.text = $"Car Profile: <color=#1FE0FF>{name}</color> <size=12>({_selectedProfileIndex + 1}/{_profiles.Count})</size>";
+            }
+            if (_profileInfoText != null) {
+                _profileInfoText.text = $"{active.vehicleType}  •  Top Speed: {active.topSpeed:F0} km/h  •  {(active.useGears ? $"{active.gearCount}-Speed" : "Direct Drive")}";
+            }
+        }
+    }
+
+    void EnsureProfileControlsExist () {
+        if (_profileCycleButton != null) return;
+        if (_panel == null) return;
+
+        Button profileBtn = CreateButton(_panel, "ProfileCycleButton", "Car Profile: Standard", new Color(0.12f, 0.34f, 0.48f));
+
+        GameObject profInfoObj = new GameObject("ProfileInfoText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        profInfoObj.transform.SetParent(_panel, false);
+        TextMeshProUGUI profInfo = profInfoObj.GetComponent<TextMeshProUGUI>();
+        profInfo.text = "Top Speed: 119 km/h  •  6-Speed Manual";
+        profInfo.fontSize = 12;
+        profInfo.alignment = TextAlignmentOptions.Center;
+        profInfo.color = new Color(0.55f, 0.78f, 0.92f);
+        profInfoObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 18f);
+
+        Button addProfileBtn = CreateButton(_panel, "AddProfileButton", "+ Clone & Add Profile", new Color(0.14f, 0.38f, 0.28f));
+        Button configBtn = CreateButton(_panel, "ConfiguratorButton", "🛠 In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
+
+        if (_resumeButton != null) {
+            int idx = _resumeButton.transform.GetSiblingIndex();
+            profileBtn.transform.SetSiblingIndex(idx + 1);
+            profInfoObj.transform.SetSiblingIndex(idx + 2);
+            addProfileBtn.transform.SetSiblingIndex(idx + 3);
+            configBtn.transform.SetSiblingIndex(idx + 4);
+        }
+
+        _profileCycleButton = profileBtn;
+        _profileButtonText = profileBtn.GetComponentInChildren<TMP_Text>(true);
+        _profileInfoText = profInfo;
+        _addProfileButton = addProfileBtn;
+        _addProfileButtonText = addProfileBtn.GetComponentInChildren<TMP_Text>(true);
+        _configuratorButton = configBtn;
+        _configuratorButtonText = configBtn.GetComponentInChildren<TMP_Text>(true);
+
+        _profileCycleButton.onClick.AddListener(NextProfile);
+        _addProfileButton.onClick.AddListener(AddNewProfile);
+        _configuratorButton.onClick.AddListener(OpenConfigurator);
+    }
+
+    void SetupButtonNavigation () {
+        List<Selectable> selectables = new List<Selectable>();
+        if (_resumeButton != null && _resumeButton.gameObject.activeInHierarchy && _resumeButton.interactable) selectables.Add(_resumeButton);
+        if (_profileCycleButton != null && _profileCycleButton.gameObject.activeInHierarchy && _profileCycleButton.interactable) selectables.Add(_profileCycleButton);
+        if (_addProfileButton != null && _addProfileButton.gameObject.activeInHierarchy && _addProfileButton.interactable) selectables.Add(_addProfileButton);
+        if (_configuratorButton != null && _configuratorButton.gameObject.activeInHierarchy && _configuratorButton.interactable) selectables.Add(_configuratorButton);
+        if (_respawnButton != null && _respawnButton.gameObject.activeInHierarchy && _respawnButton.interactable) selectables.Add(_respawnButton);
+        if (_inviteButton != null && _inviteButton.gameObject.activeInHierarchy && _inviteButton.interactable) selectables.Add(_inviteButton);
+        if (_mainMenuButton != null && _mainMenuButton.gameObject.activeInHierarchy && _mainMenuButton.interactable) selectables.Add(_mainMenuButton);
+
+        for (int i = 0; i < selectables.Count; i++) {
+            Selectable current = selectables[i];
+            Selectable up = selectables[(i - 1 + selectables.Count) % selectables.Count];
+            Selectable down = selectables[(i + 1) % selectables.Count];
+
+            Navigation nav = current.navigation;
+            nav.mode = Navigation.Mode.Explicit;
+            nav.selectOnUp = up;
+            nav.selectOnDown = down;
+            current.navigation = nav;
+
+            ColorBlock cb = current.colors;
+            cb.highlightedColor = new Color(0.2f, 0.78f, 1f, 1f); // Vibrant light blue
+            cb.selectedColor    = new Color(0.12f, 0.88f, 1f, 1f); // Bright cyan
+            cb.pressedColor     = new Color(0.08f, 0.45f, 0.75f, 1f);
+            current.colors = cb;
+        }
+    }
+
+    void HandleMenuControllerFocus () {
+        if (EventSystem.current == null) return;
+
+        GameObject curr = EventSystem.current.currentSelectedGameObject;
+        if (curr != null && curr.activeInHierarchy) {
+            _lastSelectedMenuObject = curr;
+            return;
+        }
+
+        bool hasNav = false;
+        if (Gamepad.current != null) {
+            var pad = Gamepad.current;
+            hasNav = pad.dpad.up.wasPressedThisFrame || pad.dpad.down.wasPressedThisFrame ||
+                     pad.dpad.left.wasPressedThisFrame || pad.dpad.right.wasPressedThisFrame ||
+                     pad.buttonSouth.wasPressedThisFrame ||
+                     Mathf.Abs(pad.leftStick.y.ReadValue()) > 0.35f ||
+                     Mathf.Abs(pad.leftStick.x.ReadValue()) > 0.35f;
+        }
+        if (Keyboard.current != null) {
+            var kb = Keyboard.current;
+            hasNav |= kb.upArrowKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame ||
+                      kb.wKey.wasPressedThisFrame || kb.sKey.wasPressedThisFrame;
+        }
+
+        if (hasNav) {
+            GameObject target = (_lastSelectedMenuObject != null && _lastSelectedMenuObject.activeInHierarchy)
+                ? _lastSelectedMenuObject
+                : (_resumeButton != null ? _resumeButton.gameObject : null);
+
+            if (target != null) {
+                EventSystem.current.SetSelectedGameObject(target);
+            }
+        }
     }
 
     Button FindChildButton (Transform root, string childName) {
@@ -365,14 +683,14 @@ public class InGameEscMenu : MonoBehaviour {
         RectTransform panelRt = panelObj.GetComponent<RectTransform>();
         panelRt.anchorMin = new Vector2(0.5f, 0.5f);
         panelRt.anchorMax = new Vector2(0.5f, 0.5f);
-        panelRt.sizeDelta = new Vector2(460f, 480f);
+        panelRt.sizeDelta = new Vector2(480f, 620f);
 
         Image panelImg = panelObj.GetComponent<Image>();
         panelImg.color = new Color(0.09f, 0.12f, 0.18f, 0.98f);
 
         VerticalLayoutGroup vlg = panelObj.GetComponent<VerticalLayoutGroup>();
-        vlg.padding = new RectOffset(36, 36, 32, 32);
-        vlg.spacing = 14;
+        vlg.padding = new RectOffset(36, 36, 28, 28);
+        vlg.spacing = 11;
         vlg.childAlignment = TextAnchor.MiddleCenter;
         vlg.childControlWidth = true;
         vlg.childControlHeight = false;
@@ -382,50 +700,74 @@ public class InGameEscMenu : MonoBehaviour {
         titleObj.transform.SetParent(panelObj.transform, false);
         TextMeshProUGUI title = titleObj.GetComponent<TextMeshProUGUI>();
         title.text = "PAUSED";
-        title.fontSize = 32;
+        title.fontSize = 30;
         title.fontStyle = FontStyles.Bold;
         title.alignment = TextAlignmentOptions.Center;
         title.color = Color.white;
-        titleObj.GetComponent<RectTransform>().sizeDelta = new Vector2(380f, 44f);
+        titleObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 38f);
 
         // Status
         GameObject statusObj = new GameObject("StatusText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
         statusObj.transform.SetParent(panelObj.transform, false);
         TextMeshProUGUI status = statusObj.GetComponent<TextMeshProUGUI>();
         status.text = "Rolling Skys";
-        status.fontSize = 16;
+        status.fontSize = 15;
         status.alignment = TextAlignmentOptions.Center;
         status.color = new Color(0.7f, 0.8f, 0.9f);
-        statusObj.GetComponent<RectTransform>().sizeDelta = new Vector2(380f, 28f);
+        statusObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 24f);
 
         // Buttons
         Button resumeBtn = CreateButton(panelObj.transform, "ResumeButton", "Resume", new Color(0.18f, 0.22f, 0.32f));
-        Button inviteBtn = CreateButton(panelObj.transform, "InviteButton", "Invite Friends (Steam)", new Color(0.1f, 0.48f, 0.65f));
+
+        // Profile Section
+        Button profileBtn = CreateButton(panelObj.transform, "ProfileCycleButton", "Car Profile: Standard", new Color(0.12f, 0.34f, 0.48f));
+
+        GameObject profInfoObj = new GameObject("ProfileInfoText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        profInfoObj.transform.SetParent(panelObj.transform, false);
+        TextMeshProUGUI profInfo = profInfoObj.GetComponent<TextMeshProUGUI>();
+        profInfo.text = "Top Speed: 119 km/h  •  6-Speed Manual";
+        profInfo.fontSize = 12;
+        profInfo.alignment = TextAlignmentOptions.Center;
+        profInfo.color = new Color(0.55f, 0.78f, 0.92f);
+        profInfoObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 18f);
+
+        Button addProfileBtn = CreateButton(panelObj.transform, "AddProfileButton", "+ Clone & Add Profile", new Color(0.14f, 0.38f, 0.28f));
+        Button configBtn = CreateButton(panelObj.transform, "ConfiguratorButton", "🛠 In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
+
         Button respawnBtn = CreateButton(panelObj.transform, "RespawnButton", "Reset Car (Respawn)", new Color(0.18f, 0.22f, 0.32f));
+        Button inviteBtn = CreateButton(panelObj.transform, "InviteButton", "Invite Friends (Steam)", new Color(0.1f, 0.48f, 0.65f));
         Button quitBtn = CreateButton(panelObj.transform, "MainMenuButton", "Leave to Main Menu", new Color(0.6f, 0.2f, 0.2f));
 
         // Footer Hint
         GameObject hintObj = new GameObject("HintText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
         hintObj.transform.SetParent(panelObj.transform, false);
         TextMeshProUGUI hint = hintObj.GetComponent<TextMeshProUGUI>();
-        hint.text = "Press ESC or START to resume";
-        hint.fontSize = 13;
+        hint.text = "🎮 [D-Pad/Stick] Move  [A] Select  [LB/RB] Quick Profile  [B/START] Resume";
+        hint.fontSize = 12;
         hint.alignment = TextAlignmentOptions.Center;
-        hint.color = new Color(0.5f, 0.55f, 0.65f);
-        hintObj.GetComponent<RectTransform>().sizeDelta = new Vector2(380f, 24f);
+        hint.color = new Color(0.6f, 0.68f, 0.78f);
+        hintObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 22f);
 
         _menuRoot = root;
         _panel = panelRt;
         _titleText = title;
         _sessionStatusText = status;
         _resumeButton = resumeBtn;
+        _profileCycleButton = profileBtn;
+        _profileButtonText = profileBtn.GetComponentInChildren<TMP_Text>(true);
+        _profileInfoText = profInfo;
+        _addProfileButton = addProfileBtn;
+        _addProfileButtonText = addProfileBtn.GetComponentInChildren<TMP_Text>(true);
+        _configuratorButton = configBtn;
+        _configuratorButtonText = configBtn.GetComponentInChildren<TMP_Text>(true);
+        _respawnButton = respawnBtn;
         _inviteButton = inviteBtn;
         _inviteButtonText = inviteBtn.GetComponentInChildren<TMP_Text>(true);
-        _respawnButton = respawnBtn;
         _mainMenuButton = quitBtn;
         _hintText = hint;
 
         BindButtonEvents();
+        SetupButtonNavigation();
     }
 
     Button CreateButton (Transform parent, string name, string label, Color bgColor) {
@@ -433,7 +775,7 @@ public class InGameEscMenu : MonoBehaviour {
         btnObj.transform.SetParent(parent, false);
 
         RectTransform rt = btnObj.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(380f, 48f);
+        rt.sizeDelta = new Vector2(400f, 44f);
 
         Image img = btnObj.GetComponent<Image>();
         img.color = bgColor;
@@ -441,9 +783,9 @@ public class InGameEscMenu : MonoBehaviour {
         Button btn = btnObj.GetComponent<Button>();
         ColorBlock colors = btn.colors;
         colors.normalColor = bgColor;
-        colors.highlightedColor = bgColor * 1.25f;
-        colors.pressedColor = bgColor * 0.8f;
-        colors.selectedColor = bgColor * 1.15f;
+        colors.highlightedColor = new Color(0.2f, 0.78f, 1f, 1f); // Vibrant cyan
+        colors.selectedColor    = new Color(0.12f, 0.88f, 1f, 1f); // Vibrant cyan
+        colors.pressedColor     = bgColor * 0.75f;
         btn.colors = colors;
 
         GameObject textObj = new GameObject("Text", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
@@ -455,7 +797,7 @@ public class InGameEscMenu : MonoBehaviour {
 
         TextMeshProUGUI tmp = textObj.GetComponent<TextMeshProUGUI>();
         tmp.text = label;
-        tmp.fontSize = 18;
+        tmp.fontSize = 16;
         tmp.fontStyle = FontStyles.Bold;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.color = Color.white;

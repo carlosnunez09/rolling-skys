@@ -1,6 +1,9 @@
+using System.Collections.Generic;
 using TMPro;
 using Unity.Netcode;
 using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
 /// <summary>
@@ -9,6 +12,7 @@ using UnityEngine.UI;
 /// - Steam Lobby Host & Join (P2P via Steamworks and Valve relay)
 /// - Steam Friend Invites (Steam overlay invite dialog)
 /// - Direct IP / Dedicated Server (Connecting to custom IP:Port or Edgegap)
+/// Full controller and gamepad support with auto-selection and wrap-around navigation.
 /// </summary>
 public class MainMenuNetworkUI : MonoBehaviour {
 
@@ -22,10 +26,13 @@ public class MainMenuNetworkUI : MonoBehaviour {
     [Header("Input & Text")]
     [SerializeField] TMP_InputField _addressInput;
     [SerializeField] TextMeshProUGUI _statusText;
+    [SerializeField] TextMeshProUGUI _controllerHintText;
 
     // Legacy fallback references from original scene
     [SerializeField] Button _hostButton;
     [SerializeField] Button _clientButton;
+
+    GameObject _lastSelected;
 
     void Awake() {
 #if UNITY_SERVER && !UNITY_EDITOR
@@ -37,11 +44,27 @@ public class MainMenuNetworkUI : MonoBehaviour {
 #endif
     }
 
+    void Start() {
+        ApplyAllVisuals();
+        EnsureControllerHintText();
+        SetupButtonNavigation();
+
+        // Automatically focus primary button on startup for controller navigation
+        if (EventSystem.current != null && _soloButton != null) {
+            EventSystem.current.firstSelectedGameObject = _soloButton.gameObject;
+            EventSystem.current.SetSelectedGameObject(_soloButton.gameObject);
+            _lastSelected = _soloButton.gameObject;
+        }
+    }
+
     void OnDestroy() {
         UnbindButtons();
     }
 
     void Update() {
+        HandleControllerFocus();
+        HandleControllerCancel();
+        UpdateControllerHint();
         RefreshState();
     }
 
@@ -198,6 +221,171 @@ public class MainMenuNetworkUI : MonoBehaviour {
             } else {
                 _statusText.text = "Offline | Solo & Direct IP ready (Steam not running)";
             }
+        }
+
+        SetupButtonNavigation();
+    }
+
+    // ── Controller & Navigation Helpers ────────────────────────────────────────
+
+    void HandleControllerCancel() {
+        bool bPressed = Gamepad.current != null && Gamepad.current.buttonEast.wasPressedThisFrame;
+        bool escPressed = Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+
+        if (bPressed || escPressed) {
+            if (_addressInput != null && _addressInput.isFocused) {
+                _addressInput.DeactivateInputField();
+                if (EventSystem.current != null) {
+                    Selectable target = (_directConnectButton != null && _directConnectButton.interactable)
+                        ? _directConnectButton
+                        : (Selectable)_soloButton;
+                    if (target != null) EventSystem.current.SetSelectedGameObject(target.gameObject);
+                }
+            } else if (_disconnectButton != null && _disconnectButton.interactable && _disconnectButton.gameObject.activeInHierarchy) {
+                OnDisconnectClicked();
+            }
+        }
+    }
+
+    void HandleControllerFocus() {
+        if (EventSystem.current == null) return;
+
+        GameObject current = EventSystem.current.currentSelectedGameObject;
+        if (current != null && current.activeInHierarchy) {
+            _lastSelected = current;
+            return;
+        }
+
+        bool hasNavInput = false;
+        if (Gamepad.current != null) {
+            var pad = Gamepad.current;
+            hasNavInput = pad.dpad.up.wasPressedThisFrame ||
+                          pad.dpad.down.wasPressedThisFrame ||
+                          pad.dpad.left.wasPressedThisFrame ||
+                          pad.dpad.right.wasPressedThisFrame ||
+                          pad.buttonSouth.wasPressedThisFrame ||
+                          Mathf.Abs(pad.leftStick.y.ReadValue()) > 0.35f ||
+                          Mathf.Abs(pad.leftStick.x.ReadValue()) > 0.35f;
+        }
+        if (Keyboard.current != null) {
+            var kb = Keyboard.current;
+            hasNavInput |= kb.upArrowKey.wasPressedThisFrame ||
+                           kb.downArrowKey.wasPressedThisFrame ||
+                           kb.wKey.wasPressedThisFrame ||
+                           kb.sKey.wasPressedThisFrame;
+        }
+
+        if (hasNavInput) {
+            GameObject target = (_lastSelected != null && _lastSelected.activeInHierarchy)
+                ? _lastSelected
+                : (_soloButton != null ? _soloButton.gameObject : null);
+
+            if (target != null) {
+                EventSystem.current.SetSelectedGameObject(target);
+            }
+        }
+    }
+
+    void ApplyAllVisuals() {
+        ApplySelectableColors(_soloButton);
+        ApplySelectableColors(_steamHostButton);
+        ApplySelectableColors(_hostButton);
+        ApplySelectableColors(_directConnectButton);
+        ApplySelectableColors(_clientButton);
+        ApplySelectableColors(_inviteButton);
+        ApplySelectableColors(_disconnectButton);
+        ApplySelectableColors(_addressInput);
+    }
+
+    void ApplySelectableColors(Selectable selectable) {
+        if (selectable == null) return;
+        ColorBlock colors = selectable.colors;
+        colors.highlightedColor = new Color(0.18f, 0.78f, 1f, 1f); // Vibrant light blue / cyan
+        colors.selectedColor    = new Color(0.12f, 0.88f, 1f, 1f); // Vibrant cyan glow
+        colors.pressedColor     = new Color(0.08f, 0.45f, 0.75f, 1f);
+        selectable.colors       = colors;
+    }
+
+    void SetupButtonNavigation() {
+        List<Selectable> selectables = new List<Selectable>();
+
+        if (_soloButton != null && _soloButton.gameObject.activeInHierarchy && _soloButton.interactable)
+            selectables.Add(_soloButton);
+
+        Selectable host = (_steamHostButton != null && _steamHostButton.gameObject.activeInHierarchy && _steamHostButton.interactable)
+            ? _steamHostButton
+            : (_hostButton != null && _hostButton.gameObject.activeInHierarchy && _hostButton.interactable ? _hostButton : null);
+        if (host != null && !selectables.Contains(host))
+            selectables.Add(host);
+
+        Selectable client = (_directConnectButton != null && _directConnectButton.gameObject.activeInHierarchy && _directConnectButton.interactable)
+            ? _directConnectButton
+            : (_clientButton != null && _clientButton.gameObject.activeInHierarchy && _clientButton.interactable ? _clientButton : null);
+        if (client != null && !selectables.Contains(client))
+            selectables.Add(client);
+
+        if (_addressInput != null && _addressInput.gameObject.activeInHierarchy && _addressInput.interactable)
+            selectables.Add(_addressInput);
+
+        if (_inviteButton != null && _inviteButton.gameObject.activeInHierarchy && _inviteButton.interactable)
+            selectables.Add(_inviteButton);
+
+        if (_disconnectButton != null && _disconnectButton.gameObject.activeInHierarchy && _disconnectButton.interactable)
+            selectables.Add(_disconnectButton);
+
+        if (selectables.Count <= 1) return;
+
+        for (int i = 0; i < selectables.Count; i++) {
+            Selectable current = selectables[i];
+            Selectable up = selectables[(i - 1 + selectables.Count) % selectables.Count];
+            Selectable down = selectables[(i + 1) % selectables.Count];
+
+            Navigation nav = current.navigation;
+            nav.mode = Navigation.Mode.Explicit;
+            nav.selectOnUp = up;
+            nav.selectOnDown = down;
+            current.navigation = nav;
+        }
+    }
+
+    void EnsureControllerHintText() {
+        if (_controllerHintText != null) return;
+
+        Canvas canvas = GetComponentInParent<Canvas>();
+        if (canvas == null) canvas = FindAnyObjectByType<Canvas>();
+        if (canvas == null) return;
+
+        Transform existing = canvas.transform.Find("ControllerHintText");
+        if (existing != null) {
+            _controllerHintText = existing.GetComponent<TextMeshProUGUI>();
+            UpdateControllerHint();
+            return;
+        }
+
+        GameObject hintObj = new GameObject("ControllerHintText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+        hintObj.transform.SetParent(canvas.transform, false);
+
+        RectTransform rt = hintObj.GetComponent<RectTransform>();
+        rt.anchorMin = new Vector2(0f, 0f);
+        rt.anchorMax = new Vector2(1f, 0f);
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.anchoredPosition = new Vector2(0f, 18f);
+        rt.sizeDelta = new Vector2(-40f, 32f);
+
+        _controllerHintText = hintObj.GetComponent<TextMeshProUGUI>();
+        _controllerHintText.fontSize = 14;
+        _controllerHintText.alignment = TextAlignmentOptions.Center;
+        _controllerHintText.color = new Color(0.6f, 0.7f, 0.8f, 0.95f);
+        UpdateControllerHint();
+    }
+
+    void UpdateControllerHint() {
+        if (_controllerHintText == null) return;
+        bool isPad = Gamepad.current != null;
+        if (isPad) {
+            _controllerHintText.text = "<color=#1FE0FF>🎮 Controller:</color> [D-Pad / Left Stick] Navigate   [A] Select   [B] Back / Disconnect";
+        } else {
+            _controllerHintText.text = "<color=#8E9CAE>⌨ Keyboard:</color> [Arrows / WASD] Navigate   [Enter / Space] Select   [Esc] Cancel";
         }
     }
 }

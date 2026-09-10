@@ -497,16 +497,17 @@ public class MovingCar : NetworkBehaviour {
 	Vector3 _initialSpawnPosition;
 	Quaternion _initialSpawnRotation;
 
-	void OnValidate () {
-		if (carProfile != null && !Application.isPlaying) {
-			ApplyProfile(carProfile);
-		}
+	void RefreshDerivedProperties () {
 		if (maxGroundAngle < 65f) maxGroundAngle = 65f;
 		minGroundDot = Mathf.Cos(maxGroundAngle * Mathf.Deg2Rad);
 		if (jumpHeight > 0f && maxJumpHeight == 3.8f && jumpHeight != 2f) {
 			maxJumpHeight = jumpHeight;
 			minJumpHeight = Mathf.Max(jumpHeight * 0.35f, 0.8f);
 		}
+	}
+
+	void OnValidate () {
+		RefreshDerivedProperties();
 		if (Application.isPlaying)
 			ApplyOfflineSceneTestState();
 	}
@@ -523,7 +524,7 @@ public class MovingCar : NetworkBehaviour {
 		if (carProfile != null) {
 			ApplyProfile(carProfile);
 		}
-		OnValidate();
+		RefreshDerivedProperties();
 		yaw       = transform.eulerAngles.y;
 		prevSpeed = 0f;
 		_currentRPM  = idleRPM;
@@ -1394,7 +1395,7 @@ public class MovingCar : NetworkBehaviour {
 		maxSkidPoints             = profile.maxSkidPoints;
 		skidGroundOffset          = profile.skidGroundOffset;
 
-		OnValidate();
+		RefreshDerivedProperties();
 	}
 
 	public void ExportToProfile (CarDataSO profile) {

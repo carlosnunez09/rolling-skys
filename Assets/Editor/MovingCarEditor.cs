@@ -218,7 +218,17 @@ public class MovingCarEditor : Editor {
 		EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
 		EditorGUILayout.BeginHorizontal();
+		EditorGUI.BeginChangeCheck();
 		EditorGUILayout.PropertyField(p_carProfile, new GUIContent("Active Profile"));
+		if (EditorGUI.EndChangeCheck()) {
+			serializedObject.ApplyModifiedProperties();
+			CarDataSO newProfile = (CarDataSO)p_carProfile.objectReferenceValue;
+			if (newProfile != null) {
+				Undo.RecordObject(_car, "Apply Car Profile");
+				_car.ApplyProfile(newProfile);
+				EditorUtility.SetDirty(_car);
+			}
+		}
 
 		if (GUILayout.Button("New Asset", GUILayout.Width(80))) {
 			CreateNewProfileAsset();

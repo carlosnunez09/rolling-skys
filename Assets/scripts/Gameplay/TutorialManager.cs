@@ -446,10 +446,14 @@ public class TutorialManager : MonoBehaviour {
 		GUI.Label(new Rect(barX + barW + 12, barY - 4, 80, 20), progressText, _stepCompleted ? _statusStyle : _badgeStyle);
 
 		// Skip button
-		if (GUI.Button(new Rect(x + w - 85, y + 100, 75, 22), "Skip [Tab]", _btnStyle)) {
+		string skipLabel = Gamepad.current != null ? "Skip [Back]" : "Skip [Tab]";
+		if (GUI.Button(new Rect(x + w - 95, y + 100, 85, 22), skipLabel, _btnStyle)) {
 			SkipStep();
 		}
 		if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame) {
+			SkipStep();
+		}
+		if (Gamepad.current != null && Gamepad.current.selectButton.wasPressedThisFrame) {
 			SkipStep();
 		}
 	}
@@ -474,12 +478,24 @@ public class TutorialManager : MonoBehaviour {
 		DrawStatRow(x + 50, statsY + 78, "Mini-Turbos Fired",   $"{_miniTurboCount}");
 
 		// Action Buttons
-		if (GUI.Button(new Rect(x + 60, y + 210, 180, 34), "Restart Tutorial", _btnStyle)) {
+		string restartLabel = Gamepad.current != null ? "Restart [Y]" : "Restart Tutorial";
+		string freeDriveLabel = Gamepad.current != null ? "Free Drive [A]" : "Free Drive / Race";
+
+		if (GUI.Button(new Rect(x + 60, y + 210, 180, 34), restartLabel, _btnStyle)) {
 			StartTutorial();
 		}
-		if (GUI.Button(new Rect(x + 280, y + 210, 180, 34), "Free Drive / Race", _btnStyle)) {
+		if (GUI.Button(new Rect(x + 280, y + 210, 180, 34), freeDriveLabel, _btnStyle)) {
 			StopTutorial();
 			FindAnyObjectByType<OrbitCamera>()?.SetCinematicMode(false);
+		}
+
+		if (Gamepad.current != null) {
+			if (Gamepad.current.buttonSouth.wasPressedThisFrame) {
+				StopTutorial();
+				FindAnyObjectByType<OrbitCamera>()?.SetCinematicMode(false);
+			} else if (Gamepad.current.buttonNorth.wasPressedThisFrame) {
+				StartTutorial();
+			}
 		}
 	}
 
