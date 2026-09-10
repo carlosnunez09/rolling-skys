@@ -2,7 +2,10 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-/// <summary>Per-camera shader cutaway. Does not change materials, queues, collision or shadows.</summary>
+/// <summary>
+/// Per-camera shader cutaway. Does not change materials, queues, collision or shadows.
+/// Bound by <see cref="FollowCameraPose"/>; add in Edit mode to serialize radius/softness.
+/// </summary>
 [RequireComponent(typeof(Camera))]
 public sealed class CameraOcclusionFade : MonoBehaviour {
     [SerializeField, Min(0.2f)] float revealRadius = 1.4f;
