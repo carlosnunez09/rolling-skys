@@ -157,6 +157,29 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 18354e318706dcd45b5b328ef30d8aa8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::MovingCar
+  carProfile: {fileID: 11400000, guid: fc4c349f7e4c49919583be7cb7bc66fc, type: 2}
+  useGears: 1
+  gearCount: 6
+  gearRatios:
+  - 3.4
+  - 2.1
+  - 1.5
+  - 1.15
+  - 0.92
+  - 0.75
+  shiftUpRPM: 6800
+  shiftDownRPM: 3000
+  idleRPM: 900
+  redlineRPM: 7500
+  shiftDelay: 0.08
+  firstGearTorqueBoost: 1.35
+  wheelBase: 1.8
+  maxSteerAngle: 35
+  steerSensitivity: 1
+  speedSteerFalloff: 0.35
+  canGlide: 0
+  glideFallSpeed: 3.5
+  glideForwardSpeed: 40
   maxSpeed: 76.6
   maxReverseSpeed: 9.1
   acceleration: 76.08

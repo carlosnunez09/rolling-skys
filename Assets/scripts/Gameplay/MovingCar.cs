@@ -39,41 +39,85 @@ public class MovingCar : NetworkBehaviour {
 		return false;
 	}
 
+	[BoxGroup("Profile"), SerializeField]
+	CarDataSO carProfile;
+
 	// ── Engine ────────────────────────────────────────────────────────
 
-	[BoxGroup("Engine"), SerializeField, Range(0f, 100f)]
-	float maxSpeed = 20f;
+	[BoxGroup("Engine"), SerializeField, Range(0f, 150f)]
+	float maxSpeed = 76.6f;
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 50f)]
-	float maxReverseSpeed = 8f;
+	float maxReverseSpeed = 9.1f;
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 500f)]
-	float acceleration = 60f;
+	float acceleration = 76.08f;
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 500f)]
 	float brakeForce = 120f;
 
 	[BoxGroup("Engine"), SerializeField, Range(0f, 50f)]
-	float coastDeceleration = 14f;
+	float coastDeceleration = 2.1f;
 
 	// X = speed / maxSpeed (0–1), Y = torque multiplier (0–1).
 	// High torque at low speed, tapers off toward max speed.
 	[BoxGroup("Engine"), SerializeField, CurveRange(0f, 0f, 1f, 1f)]
-	AnimationCurve torqueCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0f);
+	AnimationCurve torqueCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0.2f);
 
 	// Speed the car can still creep toward beyond maxSpeed — reached very slowly.
-	[BoxGroup("Engine"), SerializeField, Range(0f, 200f), Label("Top Speed  m/s")]
-	float topSpeed = 30f;
+	[BoxGroup("Engine"), SerializeField, Range(0f, 250f), Label("Top Speed  m/s")]
+	float topSpeed = 119.3f;
 
 	// Peak force applied at the start of the overdrive zone (at maxSpeed).
 	// Tapers linearly to zero at topSpeed so the approach feels natural.
 	[BoxGroup("Engine"), SerializeField, Range(0f, 100f), Label("Overdrive Force")]
-	float overdriveForce = 6f;
+	float overdriveForce = 26.4f;
+
+	// ── Transmission & Gears ──────────────────────────────────────────
+
+	[BoxGroup("Transmission"), SerializeField]
+	bool useGears = true;
+
+	[BoxGroup("Transmission"), SerializeField, Range(1, 8)]
+	int gearCount = 6;
+
+	[BoxGroup("Transmission"), SerializeField]
+	float[] gearRatios = new float[] { 3.4f, 2.1f, 1.5f, 1.15f, 0.92f, 0.75f };
+
+	[BoxGroup("Transmission"), SerializeField, Range(2000f, 9000f), Label("Shift Up RPM")]
+	float shiftUpRPM = 6800f;
+
+	[BoxGroup("Transmission"), SerializeField, Range(1000f, 5000f), Label("Shift Down RPM")]
+	float shiftDownRPM = 3000f;
+
+	[BoxGroup("Transmission"), SerializeField, Range(600f, 1500f), Label("Idle RPM")]
+	float idleRPM = 900f;
+
+	[BoxGroup("Transmission"), SerializeField, Range(5000f, 10000f), Label("Redline RPM")]
+	float redlineRPM = 7500f;
+
+	[BoxGroup("Transmission"), SerializeField, Range(0.01f, 0.5f), Label("Shift Delay  s")]
+	float shiftDelay = 0.08f;
+
+	[BoxGroup("Transmission"), SerializeField, Range(0.5f, 2f), Label("1st Gear Torque Boost")]
+	float firstGearTorqueBoost = 1.35f;
 
 	// ── Steering ──────────────────────────────────────────────────────
 
 	[BoxGroup("Steering"), SerializeField, Range(1f, 30f)]
-	float minTurningRadius = 5.2f;
+	float minTurningRadius = 6.0f;
+
+	[BoxGroup("Steering"), SerializeField, Range(0.5f, 4f), Label("Wheelbase  m")]
+	float wheelBase = 1.8f;
+
+	[BoxGroup("Steering"), SerializeField, Range(15f, 60f), Label("Max Steer Angle  °")]
+	float maxSteerAngle = 35f;
+
+	[BoxGroup("Steering"), SerializeField, Range(0.5f, 5f), Label("Steer Sensitivity")]
+	float steerSensitivity = 1.0f;
+
+	[BoxGroup("Steering"), SerializeField, Range(0f, 1f), Label("Speed Steer Falloff")]
+	float speedSteerFalloff = 0.35f;
 
 	// ── Grip & Drift ──────────────────────────────────────────────────
 
@@ -148,6 +192,15 @@ public class MovingCar : NetworkBehaviour {
 
 	[BoxGroup("Air Control"), SerializeField, Range(1f, 12f), Label("Landing Probe Distance  m")]
 	float landingProbeDistance = 4.5f;
+
+	[BoxGroup("Air Control"), SerializeField, Label("Enable Glider (Future Feature)")]
+	bool canGlide = false;
+
+	[BoxGroup("Air Control"), SerializeField, Range(1f, 10f), Label("Glide Fall Speed  m/s")]
+	float glideFallSpeed = 3.5f;
+
+	[BoxGroup("Air Control"), SerializeField, Range(10f, 80f), Label("Glide Forward Speed  m/s")]
+	float glideForwardSpeed = 40f;
 
 	// ── Skid Marks ────────────────────────────────────────────────────
 
@@ -308,6 +361,7 @@ public class MovingCar : NetworkBehaviour {
 	public string GravitySource  => statGravitySource;
 	public bool  RigidbodyBelow  => statRigidbodyBelow;
 	public float GroundFriction  => _groundFriction;
+	public Vector3 ContactNormal => contactNormal;
 
 	/// Normalised speed ratio [0–1] — matches the X axis of the torque curve.
 	public float SpeedRatio => maxSpeed > 0f ? Mathf.Clamp01(statSpeed / maxSpeed) : 0f;
@@ -315,8 +369,19 @@ public class MovingCar : NetworkBehaviour {
 	/// Current torque multiplier sampled from the curve [0–1].
 	public float TorqueRatio => torqueCurve.Evaluate(SpeedRatio);
 
-	/// Simulated RPM: maps SpeedRatio to a 0–8000 RPM scale for the dial.
-	public float RPM => SpeedRatio * 8000f;
+	/// Simulated RPM: drives HUD tachometer / dial from gear transmission.
+	public float RPM => _currentRPM;
+
+	/// Profile and transmission accessors
+	public CarDataSO Profile => carProfile;
+	public int CurrentGear => _currentGear;
+	public string GearName => _currentGear < 0 ? "R" : (_currentGear == 0 ? "N" : _currentGear.ToString());
+	public float EngineRPM => _currentRPM;
+	public float RPMNormalized => redlineRPM > idleRPM ? Mathf.Clamp01((_currentRPM - idleRPM) / (redlineRPM - idleRPM)) : 0f;
+	public int GearCount => gearCount;
+	public float WheelBase => wheelBase;
+	public float MaxSteerAngle => maxSteerAngle;
+	public float CurrentSteerAngle => _currentSteerAngle;
 
 	/// Max speed setting — needed by the HUD to scale the speedometer dial.
 	public float MaxSpeed => maxSpeed;
@@ -325,6 +390,11 @@ public class MovingCar : NetworkBehaviour {
 	public AnimationCurve TorqueCurve => torqueCurve;
 
 	// ── Private State ─────────────────────────────────────────────────
+
+	int   _currentGear = 1;
+	float _currentRPM = 900f;
+	float _shiftTimer = 0f;
+	float _currentSteerAngle = 0f;
 
 	Rigidbody body;
 	GravityCar gravityCar;
@@ -428,6 +498,9 @@ public class MovingCar : NetworkBehaviour {
 	Quaternion _initialSpawnRotation;
 
 	void OnValidate () {
+		if (carProfile != null && !Application.isPlaying) {
+			ApplyProfile(carProfile);
+		}
 		if (maxGroundAngle < 65f) maxGroundAngle = 65f;
 		minGroundDot = Mathf.Cos(maxGroundAngle * Mathf.Deg2Rad);
 		if (jumpHeight > 0f && maxJumpHeight == 3.8f && jumpHeight != 2f) {
@@ -447,11 +520,16 @@ public class MovingCar : NetworkBehaviour {
 	void Awake () {
 		body = GetComponent<Rigidbody>();
 		gravityCar = GetComponent<GravityCar>();
+		if (carProfile != null) {
+			ApplyProfile(carProfile);
+		}
 		OnValidate();
-		yaw      = transform.eulerAngles.y;
-		// Initialise so the first acceleration reading is 0, not a spike from
-		// (currentSpeed - 0) / fixedDeltaTime on the very first FixedUpdate.
+		yaw       = transform.eulerAngles.y;
 		prevSpeed = 0f;
+		_currentRPM  = idleRPM;
+		_currentGear = 1;
+		_shiftTimer  = 0f;
+		_currentSteerAngle = 0f;
 
 #if !UNITY_SERVER || UNITY_EDITOR
 		// Skid mark mesh — client visual only, never needed on server
@@ -678,6 +756,10 @@ public class MovingCar : NetworkBehaviour {
 		_airPitch = 0f;
 		_airRoll = 0f;
 		_jumpActive = false;
+		_currentGear = 1;
+		_currentRPM = idleRPM;
+		_shiftTimer = 0f;
+		_currentSteerAngle = 0f;
 
 		_haptics?.TriggerImpulse(0.5f, 0.5f, 0.25f);
 	}
@@ -835,7 +917,10 @@ public class MovingCar : NetworkBehaviour {
 		float   throttle     = (trigThrottle > 0.01f || trigBrake > 0.01f) ? (trigThrottle - trigBrake) : input.y;
 
 		float   steerVal     = steerAction != null ? steerAction.ReadValue<float>() : 0f;
-		float   steer        = Mathf.Abs(steerVal) > 0.01f ? steerVal : input.x;
+		float   rawSteer     = Mathf.Abs(steerVal) > 0.01f ? steerVal : input.x;
+		float   steerFalloff = 1f - Mathf.Clamp01(velocity.magnitude / Mathf.Max(topSpeed, 1f)) * speedSteerFalloff;
+		float   steer        = rawSteer * steerSensitivity * steerFalloff;
+		_currentSteerAngle   = steer * maxSteerAngle;
 
 		bool    isDrifting   = driftAction != null && driftAction.IsPressed();
 		if (IsSpawned && _networkDrifting.Value != isDrifting)
@@ -944,20 +1029,33 @@ public class MovingCar : NetworkBehaviour {
 			forward  = rotation * Vector3.forward;
 			right    = rotation * Vector3.right;
 
-			// ── Engine with Surface Speed Scaling ─────────────────────────────
+			// ── Engine with Surface Speed Scaling & Gear Multipliers ──────────
 			float effectiveMaxSpeed = maxSpeed * _groundSpeedMultiplier;
 			float effectiveTopSpeed = topSpeed * _groundSpeedMultiplier;
 			float effectiveAccel    = acceleration * Mathf.Clamp(_groundSpeedMultiplier, 0.35f, 1.25f);
 
+			// Update Gear Transmission
+			UpdateTransmission(throttle, fwdSpeed, absSpeed, effectiveTopSpeed);
+
+			float gearMultiplier = 1f;
+			if (useGears && gearRatios != null && gearRatios.Length > 0 && _currentGear >= 1) {
+				int gIdx = Mathf.Clamp(_currentGear - 1, 0, gearRatios.Length - 1);
+				gearMultiplier = gearRatios[gIdx] / gearRatios[0];
+				if (_currentGear == 1) gearMultiplier *= firstGearTorqueBoost;
+			}
+			if (_shiftTimer > 0f) {
+				gearMultiplier *= 0.45f; // Brief power dip during gear shift
+			}
+
 			if (throttle > 0f) {
 				if (fwdSpeed < effectiveMaxSpeed) {
 					float speedRatio       = Mathf.Clamp01(fwdSpeed / effectiveMaxSpeed);
-					float torqueMultiplier = torqueCurve.Evaluate(speedRatio);
+					float torqueMultiplier = torqueCurve.Evaluate(speedRatio) * gearMultiplier;
 					body.AddForce(forward * (throttle * effectiveAccel * torqueMultiplier), ForceMode.Acceleration);
 
 				} else if (fwdSpeed < effectiveTopSpeed && !isDrifting) {
 					float overdriveRatio = Mathf.Clamp01((fwdSpeed - effectiveMaxSpeed) / Mathf.Max(effectiveTopSpeed - effectiveMaxSpeed, 0.01f));
-					float force          = Mathf.Lerp(overdriveForce, 0f, overdriveRatio);
+					float force          = Mathf.Lerp(overdriveForce, 0f, overdriveRatio) * gearMultiplier;
 					body.AddForce(forward * (throttle * force), ForceMode.Acceleration);
 				}
 
@@ -1047,6 +1145,21 @@ public class MovingCar : NetworkBehaviour {
 			Quaternion baseAirHeading = gravityCar.GravityAlignment * Quaternion.AngleAxis(yaw, Vector3.up);
 			Quaternion airRotation = landingTilt * baseAirHeading * Quaternion.Euler(_airPitch, 0f, _airRoll);
 			body.MoveRotation(airRotation);
+
+			// ── Future Glider Expansion Hook ──────────────────────────────────
+			if (canGlide && throttle > 0.05f) {
+				Vector3 airVel = body.linearVelocity;
+				float vertVel = Vector3.Dot(airVel, upAxis);
+				if (vertVel < -glideFallSpeed) {
+					airVel -= upAxis * (vertVel - (-glideFallSpeed));
+				}
+				Vector3 airForward = airRotation * Vector3.forward;
+				float fwdAir = Vector3.Dot(airVel, airForward);
+				if (fwdAir < glideForwardSpeed) {
+					airVel += airForward * (acceleration * 0.45f * Time.fixedDeltaTime);
+				}
+				body.linearVelocity = airVel;
+			}
 		}
 
 		// ── Jump & Variable Height Sustain ────────────────────────────────
@@ -1139,6 +1252,227 @@ public class MovingCar : NetworkBehaviour {
 
 		statRigidbodyBelow = Physics.Raycast(body.position, -gravityCar.UpAxis, out RaycastHit hit, probeDistance * 2f)
 			&& hit.rigidbody != null;
+	}
+
+	// ── Transmission & Gear Simulation ────────────────────────────────
+
+	void UpdateTransmission (float throttle, float fwdSpeed, float absSpeed, float topSpeedCap) {
+		if (!useGears || gearCount <= 0) {
+			_currentGear = fwdSpeed >= -0.1f ? 1 : -1;
+			_currentRPM = maxSpeed > 0f ? Mathf.Lerp(idleRPM, redlineRPM, SpeedRatio) : idleRPM;
+			return;
+		}
+
+		if (_shiftTimer > 0f) {
+			_shiftTimer -= Time.fixedDeltaTime;
+		}
+
+		// Reverse Gear
+		if (throttle < -0.05f && fwdSpeed < 0.2f) {
+			_currentGear = -1;
+			float revRatio = maxReverseSpeed > 0f ? Mathf.Clamp01(-fwdSpeed / maxReverseSpeed) : 0f;
+			float targetRPM = Mathf.Lerp(idleRPM, redlineRPM, revRatio);
+			_currentRPM = Mathf.MoveTowards(_currentRPM, targetRPM, 4000f * Time.fixedDeltaTime);
+			return;
+		}
+
+		// Neutral / Idle stop
+		if (absSpeed < 0.25f && Mathf.Abs(throttle) < 0.05f) {
+			_currentGear = 0;
+			_currentRPM = Mathf.MoveTowards(_currentRPM, idleRPM, 2500f * Time.fixedDeltaTime);
+			return;
+		}
+
+		if (_currentGear <= 0) _currentGear = 1;
+
+		// Calculate speed bracket for current gear
+		float maxUsableSpeed = Mathf.Max(topSpeedCap, maxSpeed, 1f);
+		float speedStep = maxUsableSpeed / gearCount;
+		float gearMinSpeed = (_currentGear - 1) * speedStep * 0.7f;
+		float gearMaxSpeed = _currentGear * speedStep * 1.15f;
+
+		float inGearRatio = Mathf.Clamp01((fwdSpeed - gearMinSpeed) / Mathf.Max(gearMaxSpeed - gearMinSpeed, 0.1f));
+		float targetGearRPM = Mathf.Lerp(idleRPM + 800f, redlineRPM, inGearRatio);
+
+		// Auto Shift Up
+		if (throttle > 0.1f && targetGearRPM >= shiftUpRPM && _currentGear < gearCount && _shiftTimer <= 0f) {
+			_currentGear++;
+			_shiftTimer = shiftDelay;
+			_currentRPM = shiftDownRPM + 300f;
+			_haptics?.TriggerImpulse(0.25f, 0.25f, 0.06f);
+		}
+		// Auto Shift Down
+		else if (targetGearRPM <= shiftDownRPM && _currentGear > 1 && _shiftTimer <= 0f) {
+			_currentGear--;
+			_shiftTimer = shiftDelay * 0.5f;
+			_currentRPM = Mathf.Min(shiftUpRPM * 0.85f, redlineRPM - 400f);
+		}
+		else {
+			float rpmRate = _shiftTimer > 0f ? 8500f : 5000f;
+			_currentRPM = Mathf.MoveTowards(_currentRPM, targetGearRPM, rpmRate * Time.fixedDeltaTime);
+		}
+	}
+
+	// ── ScriptableObject Profile Synchronization ──────────────────────
+
+	public void ApplyProfile (CarDataSO profile) {
+		if (profile == null) return;
+		carProfile = profile;
+
+		maxSpeed                  = profile.maxSpeed;
+		topSpeed                  = profile.topSpeed;
+		maxReverseSpeed           = profile.maxReverseSpeed;
+		acceleration              = profile.acceleration;
+		brakeForce                = profile.brakeForce;
+		coastDeceleration         = profile.coastDeceleration;
+		overdriveForce            = profile.overdriveForce;
+		if (profile.torqueCurve != null)
+			torqueCurve           = new AnimationCurve(profile.torqueCurve.keys);
+
+		useGears                  = profile.useGears;
+		gearCount                 = profile.gearCount;
+		gearRatios                = profile.gearRatios != null ? (float[])profile.gearRatios.Clone() : null;
+		shiftUpRPM                = profile.shiftUpRPM;
+		shiftDownRPM              = profile.shiftDownRPM;
+		idleRPM                   = profile.idleRPM;
+		redlineRPM                = profile.redlineRPM;
+		shiftDelay                = profile.shiftDelay;
+		firstGearTorqueBoost      = profile.firstGearTorqueBoost;
+
+		minTurningRadius          = profile.minTurningRadius;
+		wheelSpread               = profile.wheelSpread;
+		wheelBase                 = profile.wheelBase;
+		axleHeightOffset          = profile.axleHeightOffset;
+		maxSteerAngle             = profile.maxSteerAngle;
+		steerSensitivity          = profile.steerSensitivity;
+		speedSteerFalloff         = profile.speedSteerFalloff;
+
+		lateralGrip               = profile.lateralGrip;
+		driftGrip                 = profile.driftGrip;
+		driftYawMultiplier        = profile.driftYawMultiplier;
+		maxDriftAngle             = profile.maxDriftAngle;
+		driftAngleRate            = profile.driftAngleRate;
+		counterSteerAuthority     = profile.counterSteerAuthority;
+		miniTurboImpulse          = profile.miniTurboImpulse;
+		miniTurboChargeTime       = profile.miniTurboChargeTime;
+		yawInertiaSmoothRate      = profile.yawInertiaSmoothRate;
+
+		downforceStrength         = profile.downforceStrength;
+		curvatureAdhesion         = profile.curvatureAdhesion;
+		minAdhesionVelocity       = profile.minAdhesionVelocity;
+
+		airPitchSpeed             = profile.airPitchSpeed;
+		airYawSpeed               = profile.airYawSpeed;
+		airRollSpeed              = profile.airRollSpeed;
+		airAutoRightSpeed         = profile.airAutoRightSpeed;
+		airAngularDamping         = profile.airAngularDamping;
+		preAlignToLanding         = profile.preAlignToLanding;
+		landingProbeDistance      = profile.landingProbeDistance;
+		canGlide                  = profile.canGlide;
+		glideFallSpeed            = profile.glideFallSpeed;
+		glideForwardSpeed         = profile.glideForwardSpeed;
+
+		maxGroundAngle            = profile.maxGroundAngle;
+		maxSnapSpeed              = profile.maxSnapSpeed;
+		probeDistance             = profile.probeDistance;
+		probeMask                 = profile.probeMask;
+		minSurfaceSpeedMultiplier = profile.minSurfaceSpeedMultiplier;
+		surfaceTransitionSpeed    = profile.surfaceTransitionSpeed;
+		minJumpHeight             = profile.minJumpHeight;
+		maxJumpHeight             = profile.maxJumpHeight;
+		maxJumpHoldDuration       = profile.maxJumpHoldDuration;
+		jumpCooldown              = profile.jumpCooldown;
+		jumpBufferDuration        = profile.jumpBufferDuration;
+		maxSlipYawRate            = profile.maxSlipYawRate;
+		slipRecoveryRate          = profile.slipRecoveryRate;
+
+		skidMaterial              = profile.skidMaterial;
+		markWidth                 = profile.markWidth;
+		fadeTime                  = profile.fadeTime;
+		minSegmentLength          = profile.minSegmentLength;
+		minSkidLateralSpeed       = profile.minSkidLateralSpeed;
+		maxSkidPoints             = profile.maxSkidPoints;
+		skidGroundOffset          = profile.skidGroundOffset;
+
+		OnValidate();
+	}
+
+	public void ExportToProfile (CarDataSO profile) {
+		if (profile == null) return;
+		profile.maxSpeed                  = maxSpeed;
+		profile.topSpeed                  = topSpeed;
+		profile.maxReverseSpeed           = maxReverseSpeed;
+		profile.acceleration              = acceleration;
+		profile.brakeForce                = brakeForce;
+		profile.coastDeceleration         = coastDeceleration;
+		profile.overdriveForce            = overdriveForce;
+		if (torqueCurve != null)
+			profile.torqueCurve           = new AnimationCurve(torqueCurve.keys);
+
+		profile.useGears                  = useGears;
+		profile.gearCount                 = gearCount;
+		profile.gearRatios                = gearRatios != null ? (float[])gearRatios.Clone() : null;
+		profile.shiftUpRPM                = shiftUpRPM;
+		profile.shiftDownRPM              = shiftDownRPM;
+		profile.idleRPM                   = idleRPM;
+		profile.redlineRPM                = redlineRPM;
+		profile.shiftDelay                = shiftDelay;
+		profile.firstGearTorqueBoost      = firstGearTorqueBoost;
+
+		profile.minTurningRadius          = minTurningRadius;
+		profile.wheelSpread               = wheelSpread;
+		profile.wheelBase                 = wheelBase;
+		profile.axleHeightOffset          = axleHeightOffset;
+		profile.maxSteerAngle             = maxSteerAngle;
+		profile.steerSensitivity          = steerSensitivity;
+		profile.speedSteerFalloff         = speedSteerFalloff;
+
+		profile.lateralGrip               = lateralGrip;
+		profile.driftGrip                 = driftGrip;
+		profile.driftYawMultiplier        = driftYawMultiplier;
+		profile.maxDriftAngle             = maxDriftAngle;
+		profile.driftAngleRate            = driftAngleRate;
+		profile.counterSteerAuthority     = counterSteerAuthority;
+		profile.miniTurboImpulse          = miniTurboImpulse;
+		profile.miniTurboChargeTime       = miniTurboChargeTime;
+		profile.yawInertiaSmoothRate      = yawInertiaSmoothRate;
+
+		profile.downforceStrength         = downforceStrength;
+		profile.curvatureAdhesion         = curvatureAdhesion;
+		profile.minAdhesionVelocity       = minAdhesionVelocity;
+
+		profile.airPitchSpeed             = airPitchSpeed;
+		profile.airYawSpeed               = airYawSpeed;
+		profile.airRollSpeed              = airRollSpeed;
+		profile.airAutoRightSpeed         = airAutoRightSpeed;
+		profile.airAngularDamping         = airAngularDamping;
+		profile.preAlignToLanding         = preAlignToLanding;
+		profile.landingProbeDistance      = landingProbeDistance;
+		profile.canGlide                  = canGlide;
+		profile.glideFallSpeed            = glideFallSpeed;
+		profile.glideForwardSpeed         = glideForwardSpeed;
+
+		profile.maxGroundAngle            = maxGroundAngle;
+		profile.maxSnapSpeed              = maxSnapSpeed;
+		profile.probeDistance             = probeDistance;
+		profile.probeMask                 = probeMask;
+		profile.minSurfaceSpeedMultiplier = minSurfaceSpeedMultiplier;
+		profile.surfaceTransitionSpeed    = surfaceTransitionSpeed;
+		profile.minJumpHeight             = minJumpHeight;
+		profile.maxJumpHeight             = maxJumpHeight;
+		profile.maxJumpHoldDuration       = maxJumpHoldDuration;
+		profile.jumpCooldown              = jumpCooldown;
+		profile.jumpBufferDuration        = jumpBufferDuration;
+		profile.maxSlipYawRate            = maxSlipYawRate;
+		profile.slipRecoveryRate          = slipRecoveryRate;
+
+		profile.skidMaterial              = skidMaterial;
+		profile.markWidth                 = markWidth;
+		profile.fadeTime                  = fadeTime;
+		profile.minSegmentLength          = minSegmentLength;
+		profile.minSkidLateralSpeed       = minSkidLateralSpeed;
+		profile.maxSkidPoints             = maxSkidPoints;
+		profile.skidGroundOffset          = skidGroundOffset;
 	}
 
 	// On flat ground: gravity alignment + yaw + drift slip angle.

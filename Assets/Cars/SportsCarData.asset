@@ -1,0 +1,132 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 668f263ad31144ac9c90c76d2b32290d, type: 3}
+  m_Name: SportsCarData
+  m_EditorClassIdentifier: Assembly-CSharp::CarDataSO
+  profileName: GT Sports Spec
+  description: High-performance sports setup featuring a tuned 6-speed transmission, razor-sharp steering snap, aggressive oversteer drift multiplier, and instant mini-turbo spool.
+  vehicleType: 1
+  maxSpeed: 88
+  topSpeed: 135
+  maxReverseSpeed: 12
+  acceleration: 92
+  brakeForce: 150
+  coastDeceleration: 1.8
+  overdriveForce: 35
+  torqueCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: -0.1
+      outSlope: -0.1
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0.35
+    - serializedVersion: 3
+      time: 0.25
+      value: 0.72
+      inSlope: -0.25
+      outSlope: -0.25
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33
+      outWeight: 1
+    - serializedVersion: 3
+      time: 0.5
+      value: 0.35
+      inSlope: -0.2
+      outSlope: -0.2
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.8
+      outWeight: 0.33
+    - serializedVersion: 3
+      time: 1
+      value: 0.3
+      inSlope: -0.3
+      outSlope: -0.3
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.6
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  useGears: 1
+  gearCount: 6
+  gearRatios:
+  - 3.6
+  - 2.3
+  - 1.65
+  - 1.25
+  - 0.98
+  - 0.78
+  shiftUpRPM: 7400
+  shiftDownRPM: 3800
+  idleRPM: 950
+  redlineRPM: 8200
+  shiftDelay: 0.06
+  firstGearTorqueBoost: 1.45
+  minTurningRadius: 5.2
+  wheelSpread: 0.58
+  wheelBase: 1.85
+  axleHeightOffset: -0.35
+  maxSteerAngle: 38
+  steerSensitivity: 1.25
+  speedSteerFalloff: 0.28
+  lateralGrip: 0.88
+  driftGrip: 0.01
+  driftYawMultiplier: 2.35
+  maxDriftAngle: 42
+  driftAngleRate: 14
+  counterSteerAuthority: 1.35
+  miniTurboImpulse: 15
+  miniTurboChargeTime: 0.85
+  yawInertiaSmoothRate: 28
+  downforceStrength: 45
+  curvatureAdhesion: 25
+  minAdhesionVelocity: 0.5
+  airPitchSpeed: 95
+  airYawSpeed: 110
+  airRollSpeed: 80
+  airAutoRightSpeed: 5.5
+  airAngularDamping: 5.5
+  preAlignToLanding: 1
+  landingProbeDistance: 4.5
+  canGlide: 0
+  glideFallSpeed: 3.5
+  glideForwardSpeed: 45
+  maxGroundAngle: 70
+  maxSnapSpeed: 55
+  probeDistance: 1
+  probeMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  minSurfaceSpeedMultiplier: 0.35
+  surfaceTransitionSpeed: 10
+  minJumpHeight: 1.2
+  maxJumpHeight: 4.2
+  maxJumpHoldDuration: 0.25
+  jumpCooldown: 0.2
+  jumpBufferDuration: 0.15
+  maxSlipYawRate: 180
+  slipRecoveryRate: 4
+  skidMaterial: {fileID: 2100000, guid: 0d4fbc35076859a4887b07d45acfd79f, type: 2}
+  markWidth: 0.24
+  fadeTime: 9
+  minSegmentLength: 0.12
+  minSkidLateralSpeed: 0.55
+  maxSkidPoints: 512
+  skidGroundOffset: 0.018
