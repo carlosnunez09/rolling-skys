@@ -24,6 +24,13 @@ public class GameNetworkManager : MonoBehaviour {
     [SerializeField] bool _findSpawnPointsByTag = true;
 
     int  _nextSpawnIndex;
+
+    [Header("Spawn Placement")]
+    [SerializeField, Min(1)] int _maxPlayers = 8;
+    [SerializeField, Min(1f)] float _generatedSpawnSpacing = 6f;
+    [SerializeField, Min(0.1f)] float _spawnSurfaceClearance = 1.2f;
+    [SerializeField, Min(1f)] float _spawnProbeHeight = 60f;
+    readonly Dictionary<ulong, int> _clientSpawnSlots = new Dictionary<ulong, int>();
     bool _gameSceneLoaded;
     string _statusMessage = "Offline";
     string _lastTargetAddress = "127.0.0.1:7777";
@@ -208,6 +215,7 @@ public class GameNetworkManager : MonoBehaviour {
         _gameSceneLoaded = false;
         _spawnPoints     = null;    // force re-cache from next game scene
         _nextSpawnIndex  = 0;
+        _clientSpawnSlots.Clear();
         CurrentMode      = ActiveNetworkMode.Offline;
         _statusMessage   = "Offline";
         _clientsAwaitingSceneSync.Clear();
@@ -335,6 +343,7 @@ public class GameNetworkManager : MonoBehaviour {
 
         Debug.LogWarning($"GameNetworkManager: Client disconnected: {clientId}. Reason: {reason}");
         _clientsAwaitingSceneSync.Remove(clientId);
+        _clientSpawnSlots.Remove(clientId);
 
         if (!NetworkManager.Singleton.IsServer) return;
         RebuildRaceRuntime();
@@ -359,27 +368,110 @@ public class GameNetworkManager : MonoBehaviour {
             return;
         }
 
-        Transform spawnPoint  = GetNextSpawnPoint();
-        Vector3   spawnPos    = spawnPoint != null ? spawnPoint.position : Vector3.zero;
-        Quaternion spawnRot   = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+        int slot = AcquireSpawnSlot(clientId);
+        Transform spawnPoint = slot >= 0 ? _spawnPoints[slot] : null;
+        Vector3   spawnPos   = spawnPoint != null ? spawnPoint.position : Vector3.zero;
+        Quaternion spawnRot  = spawnPoint != null ? spawnPoint.rotation : Quaternion.identity;
+        bool grounded = GroundSpawnPose(ref spawnPos, ref spawnRot);
         Debug.Log(spawnPoint != null
-            ? $"GameNetworkManager: Spawning client {clientId} at {spawnPoint.name} ({spawnPos})."
+            ? $"GameNetworkManager: Spawning client {clientId} at {spawnPoint.name} slot {slot} ({spawnPos}), grounded: {grounded}."
             : $"GameNetworkManager: No spawn point found for client {clientId}; using world origin.");
 
         GameObject   playerCar     = Instantiate(_carPrefab, spawnPos, spawnRot);
         NetworkObject networkObject = playerCar.GetComponent<NetworkObject>();
+        if (playerCar.TryGetComponent(out MovingCar movingCar))
+            movingCar.SetServerSpawnPose(spawnPos, spawnRot);
         networkObject.SpawnAsPlayerObject(clientId, destroyWithScene: true);
     }
 
-    Transform GetNextSpawnPoint () {
+    /// Picks a stable, non-shared spawn slot for a client (lowest free index, cycling
+    /// when every slot is taken) and skips slots currently blocked by another car.
+    int AcquireSpawnSlot (ulong clientId) {
         CacheSpawnPoints();
+        if (_spawnPoints == null || _spawnPoints.Length == 0) return -1;
 
-        if (_spawnPoints == null || _spawnPoints.Length == 0)
-            return null;
+        if (_clientSpawnSlots.TryGetValue(clientId, out int existing) && existing < _spawnPoints.Length)
+            return existing;
 
-        Transform spawnPoint = _spawnPoints[_nextSpawnIndex % _spawnPoints.Length];
+        var used = new HashSet<int>(_clientSpawnSlots.Values);
+        int count = _spawnPoints.Length;
+        int chosen = -1;
+        for (int i = 0; i < count; i++) {
+            if (used.Contains(i) || IsSpawnBlocked(_spawnPoints[i].position)) continue;
+            chosen = i;
+            break;
+        }
+        if (chosen < 0) chosen = _nextSpawnIndex % count; // all slots busy: cycle
         _nextSpawnIndex++;
-        return spawnPoint;
+        _clientSpawnSlots[clientId] = chosen;
+        return chosen;
+    }
+
+    static bool IsSpawnBlocked (Vector3 position) {
+        foreach (Collider c in Physics.OverlapSphere(position, 2.5f, ~0, QueryTriggerInteraction.Ignore)) {
+            if (c.GetComponentInParent<MovingCar>() != null) return true;
+        }
+        return false;
+    }
+
+    /// Snaps a spawn pose onto the planet surface: probe along the local gravity
+    /// up-axis from well above the point, place the car just above the hit and
+    /// align its up with the surface normal while keeping the authored heading.
+    /// Spawn points authored with world-up/flat Y on a spherical planet can sit
+    /// inside the terrain, which made cars fall through the planet mesh.
+    bool GroundSpawnPose (ref Vector3 position, ref Quaternion rotation) {
+        Vector3 up = CustomGravity.GetUpAxis(position);
+        if (up.sqrMagnitude < 1e-4f) up = Vector3.up;
+        up.Normalize();
+
+        Vector3 origin = position + up * _spawnProbeHeight;
+        RaycastHit[] hits = Physics.RaycastAll(origin, -up, _spawnProbeHeight * 3f, ~0, QueryTriggerInteraction.Ignore);
+        Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+
+        foreach (RaycastHit hit in hits) {
+            if (hit.collider.GetComponentInParent<MovingCar>() != null) continue;
+            Vector3 normal = Vector3.Dot(hit.normal, up) > 0.2f ? hit.normal : up;
+            position = hit.point + normal * _spawnSurfaceClearance;
+            Vector3 forward = Vector3.ProjectOnPlane(rotation * Vector3.forward, normal);
+            if (forward.sqrMagnitude < 1e-4f) forward = Vector3.ProjectOnPlane(Vector3.forward, normal);
+            if (forward.sqrMagnitude < 1e-4f) forward = Vector3.ProjectOnPlane(Vector3.right, normal);
+            rotation = Quaternion.LookRotation(forward.normalized, normal);
+            return true;
+        }
+
+        // No ground found: still orient upright relative to gravity.
+        Vector3 fwd = Vector3.ProjectOnPlane(rotation * Vector3.forward, up);
+        if (fwd.sqrMagnitude > 1e-4f) rotation = Quaternion.LookRotation(fwd.normalized, up);
+        return false;
+    }
+
+    /// Adds runtime spawn points (grid rows behind the authored ones, in the
+    /// planet's tangent plane) until there are _maxPlayers slots.
+    void GenerateExtraSpawnPoints (List<Transform> spawnPoints) {
+        if (spawnPoints.Count == 0 || spawnPoints.Count >= _maxPlayers) return;
+
+        Transform anchor = spawnPoints[0];
+        Vector3 centre = Vector3.zero;
+        foreach (Transform t in spawnPoints) centre += t.position;
+        centre /= spawnPoints.Count;
+
+        Vector3 up = CustomGravity.GetUpAxis(centre);
+        if (up.sqrMagnitude < 1e-4f) up = Vector3.up;
+        Vector3 forward = Vector3.ProjectOnPlane(anchor.forward, up).normalized;
+        if (forward.sqrMagnitude < 1e-4f) forward = Vector3.ProjectOnPlane(Vector3.forward, up).normalized;
+        Vector3 right = Vector3.Cross(up, forward).normalized;
+
+        const int columns = 3;
+        int generated = 0;
+        for (int i = spawnPoints.Count; i < _maxPlayers; i++, generated++) {
+            int row = 1 + generated / columns;
+            int col = generated % columns - 1;
+            Vector3 pos = centre - forward * (_generatedSpawnSpacing * 1.5f * row)
+                                 + right * (_generatedSpawnSpacing * col);
+            var go = new GameObject($"SpawnPoint_{i + 1:D2}");
+            go.transform.SetPositionAndRotation(pos, anchor.rotation);
+            spawnPoints.Add(go.transform);
+        }
     }
 
     void CacheSpawnPoints () {
@@ -401,6 +493,7 @@ public class GameNetworkManager : MonoBehaviour {
         }
 
         spawnPoints.Sort(CompareSpawnPoints);
+        GenerateExtraSpawnPoints(spawnPoints);
         _spawnPoints = spawnPoints.ToArray();
 
         if (_spawnPoints.Length == 0)
@@ -493,6 +586,13 @@ public class GameNetworkManager : MonoBehaviour {
 
     bool TryParseEndpoint (string endpoint, out string address, out ushort port) {
         string value = string.IsNullOrWhiteSpace(endpoint) ? "127.0.0.1" : endpoint.Trim();
+        // Tolerate common typos/prefixes such as "127.0.0.1;7777" or "udp://host:port".
+        int scheme = value.IndexOf("://", StringComparison.Ordinal);
+        if (scheme >= 0) value = value.Substring(scheme + 3);
+        value = value.Replace(';', ':').TrimEnd('/');
+        if (value.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase))
+            value = "127.0.0.1" + value.Substring("localhost".Length);
         address = value;
         port = _port;
 
