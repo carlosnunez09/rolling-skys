@@ -25,6 +25,7 @@ public class RaceStartTrigger : MonoBehaviour {
     [SerializeField] float _countdownSeconds = 3f;
 
     [Header("References")]
+    [Tooltip("Leave empty to use the RaceRuntime in the loaded scenes.")]
     [SerializeField] RaceRuntime _raceRuntime;
 
     [Tooltip("Tag used to identify the player car's collider.")]
@@ -32,11 +33,19 @@ public class RaceStartTrigger : MonoBehaviour {
 
     void Awake () {
         GetComponent<Collider>().isTrigger = true;
+        ResolveRaceRuntime();
+    }
+
+    public RaceRuntime RaceRuntime => ResolveRaceRuntime();
+
+    RaceRuntime ResolveRaceRuntime () {
+        if (_raceRuntime == null) _raceRuntime = FindAnyObjectByType<RaceRuntime>();
+        return _raceRuntime;
     }
 
     void OnTriggerEnter (Collider other) {
         if (!other.CompareTag(_playerTag)) return;
-        if (_raceRuntime == null || _path == null) return;
+        if (ResolveRaceRuntime() == null || _path == null) return;
         MovingCar car = other.GetComponentInParent<MovingCar>();
         if (car != null && !_raceRuntime.CanStartRace(car)) return;
         _raceRuntime.LoadTrackAndStart(_path, _trackName, _totalLaps, _countdownSeconds);
