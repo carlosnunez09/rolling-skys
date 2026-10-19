@@ -242,17 +242,46 @@ public class CarDrivingTests {
         Assert.GreaterOrEqual(reached, goal, $"only reached {reached} waypoints");
     }
 
+    static readonly Type RaceType = Type.GetType("RaceRuntime, Assembly-CSharp");
+    static readonly Type TriggerType = Type.GetType("RaceStartTrigger, Assembly-CSharp");
+
+    static Component TriggerRace (Component trigger) =>
+        TriggerType.GetProperty("RaceRuntime").GetValue(trigger) as Component;
+
+    static UnityEngine.Object TriggerPath (Component trigger) =>
+        TriggerType.GetField("_path", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+            .GetValue(trigger) as UnityEngine.Object;
+
+    static List<Component> FindRaceStartTriggers () =>
+        UnityEngine.Object.FindObjectsByType(TriggerType, FindObjectsSortMode.None).Cast<Component>().ToList();
+
+    [UnityTest]
+    public IEnumerator RaceStartTriggers_AllLinkedToRaceRuntime () {
+        Assert.NotNull(RaceType); Assert.NotNull(TriggerType);
+        var triggers = FindRaceStartTriggers();
+        if (triggers.Count == 0) Assert.Ignore("No race start in scene");
+        foreach (var t in triggers) {
+            Assert.NotNull(TriggerRace(t), $"race start trigger '{t.name}' at {t.transform.position} has no RaceRuntime");
+            Assert.NotNull(TriggerPath(t), $"race start trigger '{t.name}' at {t.transform.position} has no path");
+        }
+        yield break;
+    }
+
     [UnityTest, Timeout(60000)]
     public IEnumerator RaceStart_OnlyPlayerCarStartsCountdown () {
-        Type raceType = Type.GetType("RaceRuntime, Assembly-CSharp");
-        Type triggerType = Type.GetType("RaceStartTrigger, Assembly-CSharp");
-        Assert.NotNull(raceType); Assert.NotNull(triggerType);
-        var race = UnityEngine.Object.FindAnyObjectByType(raceType) as Component;
-        var trigger = UnityEngine.Object.FindAnyObjectByType(triggerType) as Component;
-        if (race == null || trigger == null) Assert.Ignore("No race start in scene");
+        Type raceType = RaceType;
+        Assert.NotNull(raceType); Assert.NotNull(TriggerType);
+        Rigidbody player = FindCars()[0];
+
+        // SampleScene has several race starts; use the usable one nearest the scene car.
+        var trigger = FindRaceStartTriggers()
+            .Where(t => TriggerRace(t) != null && TriggerPath(t) != null)
+            .OrderBy(t => (t.GetComponent<Collider>().bounds.center - player.position).sqrMagnitude)
+            .FirstOrDefault();
+        if (trigger == null) Assert.Ignore("No race start in scene");
+        Component race = TriggerRace(trigger);
         string Phase () => raceType.GetProperty("Phase").GetValue(race).ToString();
 
-        Rigidbody player = FindCars()[0];
         Vector3 gate = trigger.GetComponent<Collider>().bounds.center;
         Vector3 inGate = gate.normalized * player.position.magnitude;
 
