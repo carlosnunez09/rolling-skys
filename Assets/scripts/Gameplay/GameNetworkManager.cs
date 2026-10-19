@@ -250,6 +250,7 @@ public class GameNetworkManager : MonoBehaviour {
         if (sceneName != _gameSceneName) return;
 
         _gameSceneLoaded = true;
+        DespawnScenePlacedCars();
         CacheSpawnPoints();
 
         // Spawn a car for every client that connected before the scene finished loading
@@ -405,6 +406,21 @@ public class GameNetworkManager : MonoBehaviour {
         _nextSpawnIndex++;
         _clientSpawnSlots[clientId] = chosen;
         return chosen;
+    }
+
+    /// SampleScene ships a car for offline scene testing. Netcode spawns it with the
+    /// scene (server-owned, so on a host it would also take local input); players get
+    /// their own spawned cars, so take it out of the session. In-scene objects are
+    /// despawned without destroying them so Netcode can tell late joiners about it;
+    /// NetworkCarController hides it on clients.
+    static void DespawnScenePlacedCars () {
+        foreach (MovingCar car in FindObjectsByType<MovingCar>(FindObjectsInactive.Include)) {
+            if (!car.TryGetComponent(out NetworkObject networkObject)) continue;
+            if (!networkObject.IsSpawned || networkObject.IsPlayerObject || networkObject.IsSceneObject != true) continue;
+            Debug.Log($"GameNetworkManager: Removing in-scene car '{car.name}' from the network session.");
+            networkObject.Despawn(false);
+            car.gameObject.SetActive(false);
+        }
     }
 
     static bool IsSpawnBlocked (Vector3 position) {

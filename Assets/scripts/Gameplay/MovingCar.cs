@@ -666,6 +666,14 @@ public class MovingCar : NetworkBehaviour {
 	public override void OnNetworkSpawn () {
 		ResetRemoteSkidTracking();
 
+		// The offline scene-test car is spawned with the scene and owned by the server;
+		// GameNetworkManager despawns it, but until then it must not drive with host input.
+		if (NetworkObject.IsSceneObject == true && !NetworkObject.IsPlayerObject) {
+			SetInputEnabled(false);
+			body.isKinematic = true;
+			return;
+		}
+
 		if (HasLocalControl) {
 #if !UNITY_SERVER || UNITY_EDITOR
 			ApplyNetworkSpawnPose();

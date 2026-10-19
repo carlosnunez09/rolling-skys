@@ -55,6 +55,13 @@ public class NetworkCarController : NetworkBehaviour {
     public override void OnNetworkDespawn () {
         _steamId.OnValueChanged -= OnSteamIdChanged;
         _displayName.OnValueChanged -= OnDisplayNameChanged;
+
+        // The server despawns (without destroying) the in-scene offline test car at the
+        // start of a session; hide it here too so clients don't keep a frozen copy.
+        NetworkManager networkManager = NetworkManager.Singleton;
+        if (NetworkObject.IsSceneObject == true && !NetworkObject.IsPlayerObject
+            && networkManager != null && networkManager.IsListening && !networkManager.ShutdownInProgress)
+            gameObject.SetActive(false);
     }
 
     void OnSteamIdChanged (ulong previousValue, ulong newValue) => RefreshNameTag();

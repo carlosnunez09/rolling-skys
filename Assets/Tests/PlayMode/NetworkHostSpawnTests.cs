@@ -99,6 +99,6 @@ public class NetworkHostSpawnTests {
         Assert.Greater(moved, 10f);
         Assert.That(rb.position.magnitude, Is.InRange(470f, 540f));
         _log.AssertClean();
-        Assert.AreEqual(1, activeCars.Count, "host session should have exactly one car (offline scene-test car should be disabled)");
+        Assert.AreEqual(1, activeCars.Count, "host session should have exactly one car (the in-scene offline test car must be despawned)");
     }
 }
