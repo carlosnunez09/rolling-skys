@@ -23,14 +23,12 @@ public class GameNetworkManager : MonoBehaviour {
     [SerializeField] Transform[] _spawnPoints;
     [SerializeField] bool _findSpawnPointsByTag = true;
 
-    int  _nextSpawnIndex;
-
     [Header("Spawn Placement")]
     [SerializeField, Min(1)] int _maxPlayers = 8;
     [SerializeField, Min(1f)] float _generatedSpawnSpacing = 6f;
     [SerializeField, Min(0.1f)] float _spawnSurfaceClearance = 1.2f;
     [SerializeField, Min(1f)] float _spawnProbeHeight = 60f;
-    readonly Dictionary<ulong, int> _clientSpawnSlots = new Dictionary<ulong, int>();
+    readonly SpawnSlotAllocator _spawnSlots = new SpawnSlotAllocator();
     bool _gameSceneLoaded;
     string _statusMessage = "Offline";
     string _lastTargetAddress = "127.0.0.1:7777";
@@ -214,8 +212,7 @@ public class GameNetworkManager : MonoBehaviour {
 
         _gameSceneLoaded = false;
         _spawnPoints     = null;    // force re-cache from next game scene
-        _nextSpawnIndex  = 0;
-        _clientSpawnSlots.Clear();
+        _spawnSlots.Clear();
         CurrentMode      = ActiveNetworkMode.Offline;
         _statusMessage   = "Offline";
         _clientsAwaitingSceneSync.Clear();
@@ -344,7 +341,7 @@ public class GameNetworkManager : MonoBehaviour {
 
         Debug.LogWarning($"GameNetworkManager: Client disconnected: {clientId}. Reason: {reason}");
         _clientsAwaitingSceneSync.Remove(clientId);
-        _clientSpawnSlots.Remove(clientId);
+        _spawnSlots.Release(clientId);
 
         if (!NetworkManager.Singleton.IsServer) return;
         RebuildRaceRuntime();
@@ -390,22 +387,7 @@ public class GameNetworkManager : MonoBehaviour {
     int AcquireSpawnSlot (ulong clientId) {
         CacheSpawnPoints();
         if (_spawnPoints == null || _spawnPoints.Length == 0) return -1;
-
-        if (_clientSpawnSlots.TryGetValue(clientId, out int existing) && existing < _spawnPoints.Length)
-            return existing;
-
-        var used = new HashSet<int>(_clientSpawnSlots.Values);
-        int count = _spawnPoints.Length;
-        int chosen = -1;
-        for (int i = 0; i < count; i++) {
-            if (used.Contains(i) || IsSpawnBlocked(_spawnPoints[i].position)) continue;
-            chosen = i;
-            break;
-        }
-        if (chosen < 0) chosen = _nextSpawnIndex % count; // all slots busy: cycle
-        _nextSpawnIndex++;
-        _clientSpawnSlots[clientId] = chosen;
-        return chosen;
+        return _spawnSlots.Acquire(clientId, _spawnPoints.Length, i => IsSpawnBlocked(_spawnPoints[i].position));
     }
 
     /// SampleScene ships a car for offline scene testing. Netcode spawns it with the
@@ -600,7 +582,11 @@ public class GameNetworkManager : MonoBehaviour {
         return transport;
     }
 
-    bool TryParseEndpoint (string endpoint, out string address, out ushort port) {
+    bool TryParseEndpoint (string endpoint, out string address, out ushort port) =>
+        TryParseEndpoint(endpoint, _port, out address, out port);
+
+    /// Parses "host", "host:port", "[ipv6]:port"; `defaultPort` is used when no port is given.
+    public static bool TryParseEndpoint (string endpoint, ushort defaultPort, out string address, out ushort port) {
         string value = string.IsNullOrWhiteSpace(endpoint) ? "127.0.0.1" : endpoint.Trim();
         // Tolerate common typos/prefixes such as "127.0.0.1;7777" or "udp://host:port".
         int scheme = value.IndexOf("://", StringComparison.Ordinal);
@@ -610,7 +596,7 @@ public class GameNetworkManager : MonoBehaviour {
             || value.StartsWith("localhost:", StringComparison.OrdinalIgnoreCase))
             value = "127.0.0.1" + value.Substring("localhost".Length);
         address = value;
-        port = _port;
+        port = defaultPort;
 
         if (value.StartsWith("[", StringComparison.Ordinal)) {
             int closingBracket = value.IndexOf(']');
