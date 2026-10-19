@@ -62,6 +62,12 @@ public class CarDrivingTests {
         Assert.Less(rb.linearVelocity.magnitude, 150f, $"{tag}: exploded velocity {rb.linearVelocity.magnitude:F1}");
     }
 
+    const float LaneLength = 45f, LaneHalfWidth = 2.5f;
+
+    /// Clones the scene car into parallel lanes alternating right/left of it. Lanes with
+    /// an obstacle ahead are skipped -- notably the race-start gate a few metres in front
+    /// of the scene car: its trigger starts a race whose countdown locks the player car's
+    /// input, which used to stall one fleet car at the gate.
     List<Rigidbody> SpawnFleet (int count, float spacing) {
         var cars = FindCars();
         Assert.IsNotEmpty(cars, "SampleScene has no MovingCar");
@@ -69,13 +75,68 @@ public class CarDrivingTests {
         Vector3 up = template.position.normalized;
         Vector3 fwd = Vector3.ProjectOnPlane(template.transform.forward, up).normalized;
         Vector3 right = Vector3.Cross(up, fwd);
-        for (int i = 1; i < count; i++) {
-            Vector3 pos = template.position + right * spacing * i;
-            pos = pos.normalized * template.position.magnitude;          // stay on the shell
-            Quaternion rot = Quaternion.LookRotation(Vector3.ProjectOnPlane(fwd, pos.normalized), pos.normalized);
-            UnityEngine.Object.Instantiate(template.gameObject, pos, rot).name = $"TestCar_{i}";
+        Assert.True(LaneIsClear(template.position, fwd, up, out string blocker), $"{template.name}'s lane is blocked by {blocker}");
+        float rideHeight = HeightAboveGround(template);
+
+        int spawned = 0;
+        for (int lane = 1; spawned < count - 1 && lane <= 12; lane++) {
+            float offset = spacing * ((lane + 1) / 2) * (lane % 2 == 1 ? 1f : -1f);
+            Vector3 pos = GroundedOnShell(template.position + right * offset, rideHeight);
+            Vector3 posUp = pos.normalized;
+            Vector3 posFwd = Vector3.ProjectOnPlane(fwd, posUp).normalized;
+            if (!LaneIsClear(pos, posFwd, posUp, out blocker)) {
+                Debug.Log($"[CarDrivingTests] skipping lane {offset:+0;-0} m: {blocker}");
+                continue;
+            }
+            spawned++;
+            UnityEngine.Object.Instantiate(template.gameObject, pos, Quaternion.LookRotation(posFwd, posUp)).name = $"TestCar_{spawned}";
+            Debug.Log($"[CarDrivingTests] TestCar_{spawned} in lane {offset:+0;-0} m");
         }
         return FindCars();
+    }
+
+    /// Sweeps a car-wide box along the lane at bumper-to-roof height. Solid colliders block
+    /// unless they are gently rising ground; race-start and boost-pad triggers block too,
+    /// since crossing them takes control away from the driver.
+    static bool LaneIsClear (Vector3 pos, Vector3 fwd, Vector3 up, out string blocker) {
+        Quaternion rot = Quaternion.LookRotation(fwd, up);
+        Vector3 start = pos + up * 0.5f - fwd * 2f;
+        var halfExtents = new Vector3(LaneHalfWidth, 0.6f, 1f);
+        foreach (var hit in Physics.BoxCastAll(start, halfExtents, fwd, rot, LaneLength, ~0, QueryTriggerInteraction.Collide)) {
+            Collider c = hit.collider;
+            if (c.GetComponentInParent(CarType) != null) continue;
+            if (c.isTrigger) {
+                if (c.GetComponent("RaceStartTrigger") == null && c.GetComponent("BoostPad") == null) continue;
+            } else if (hit.distance > 0f && Vector3.Dot(hit.normal, up) > 0.7f) {
+                continue;
+            }
+            blocker = $"{c.name} at {hit.distance:F1} m";
+            return false;
+        }
+        blocker = null;
+        return true;
+    }
+
+    static float HeightAboveGround (Rigidbody rb) {
+        Vector3 down = -rb.position.normalized;
+        foreach (var hit in Physics.RaycastAll(rb.position - down * 0.5f, down, 10f, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance))
+            if (hit.collider.GetComponentInParent(CarType) == null) return hit.distance - 0.5f;
+        return 1f;
+    }
+
+    static Vector3 GroundedOnShell (Vector3 approx, float rideHeight) {
+        Vector3 up = approx.normalized;
+        foreach (var hit in Physics.RaycastAll(approx + up * 10f, -up, 30f, ~0, QueryTriggerInteraction.Ignore).OrderBy(h => h.distance))
+            if (hit.collider.GetComponentInParent(CarType) == null) return hit.point + up * (rideHeight + 0.05f);
+        return approx;
+    }
+
+    static void Teleport (Rigidbody rb, Vector3 pos) {
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.position = pos;
+        rb.transform.position = pos;
+        Physics.SyncTransforms();
     }
 
     [UnityTest, Timeout(60000)]
@@ -179,5 +240,40 @@ public class CarDrivingTests {
         SetPad(0f, 0f);
         Debug.Log($"[CarDrivingTests] waypoints reached {reached}/{goal} starting at {wps[start].name} in {Time.time - t0:F1}s");
         Assert.GreaterOrEqual(reached, goal, $"only reached {reached} waypoints");
+    }
+
+    [UnityTest, Timeout(60000)]
+    public IEnumerator RaceStart_OnlyPlayerCarStartsCountdown () {
+        Type raceType = Type.GetType("RaceRuntime, Assembly-CSharp");
+        Type triggerType = Type.GetType("RaceStartTrigger, Assembly-CSharp");
+        Assert.NotNull(raceType); Assert.NotNull(triggerType);
+        var race = UnityEngine.Object.FindAnyObjectByType(raceType) as Component;
+        var trigger = UnityEngine.Object.FindAnyObjectByType(triggerType) as Component;
+        if (race == null || trigger == null) Assert.Ignore("No race start in scene");
+        string Phase () => raceType.GetProperty("Phase").GetValue(race).ToString();
+
+        Rigidbody player = FindCars()[0];
+        Vector3 gate = trigger.GetComponent<Collider>().bounds.center;
+        Vector3 inGate = gate.normalized * player.position.magnitude;
+
+        // A second Player-tagged car (stands in for a remote player's ghost). Its Start
+        // registers it as RaceRuntime's player car, so hand that back to the scene car.
+        Vector3 up = player.position.normalized;
+        Vector3 aside = player.position - Vector3.Cross(up, player.transform.forward).normalized * 10f;
+        var other = UnityEngine.Object.Instantiate(player.gameObject, aside, player.rotation).GetComponent<Rigidbody>();
+        other.name = "TestCar_Other";
+        yield return null;
+        raceType.GetMethod("SetPlayerCar").Invoke(race, new object[] { player.GetComponent(CarType) });
+        Assert.AreEqual("WaitingToStart", Phase());
+
+        Teleport(other, inGate);
+        for (int i = 0; i < 10; i++) yield return new WaitForFixedUpdate();
+        Assert.AreEqual("WaitingToStart", Phase(), "a non-player car entering the start trigger started the race");
+
+        UnityEngine.Object.Destroy(other.gameObject);
+        yield return null;
+        Teleport(player, inGate);
+        for (int i = 0; i < 10; i++) yield return new WaitForFixedUpdate();
+        Assert.AreEqual("Countdown", Phase(), "the player car entering the start trigger should start the countdown");
     }
 }

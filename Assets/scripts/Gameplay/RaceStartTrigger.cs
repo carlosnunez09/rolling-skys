@@ -37,6 +37,8 @@ public class RaceStartTrigger : MonoBehaviour {
     void OnTriggerEnter (Collider other) {
         if (!other.CompareTag(_playerTag)) return;
         if (_raceRuntime == null || _path == null) return;
+        MovingCar car = other.GetComponentInParent<MovingCar>();
+        if (car != null && !_raceRuntime.CanStartRace(car)) return;
         _raceRuntime.LoadTrackAndStart(_path, _trackName, _totalLaps, _countdownSeconds);
     }
 
