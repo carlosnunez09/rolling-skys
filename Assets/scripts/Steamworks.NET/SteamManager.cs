@@ -63,7 +63,13 @@ public class SteamManager : MonoBehaviour {
 	protected virtual void Awake() {
 		// Only one instance of SteamManager at a time!
 		if (s_instance != null) {
-			Destroy(gameObject);
+			// The duplicate may share its GameObject with other managers (MainMenu's
+			// "networkmanager" also holds NetworkManager/GameNetworkManager), so only
+			// remove the whole object when the SteamManager is all it carries.
+			if (GetComponents<Component>().Length <= 2)
+				Destroy(gameObject);
+			else
+				Destroy(this);
 			return;
 		}
 		s_instance = this;

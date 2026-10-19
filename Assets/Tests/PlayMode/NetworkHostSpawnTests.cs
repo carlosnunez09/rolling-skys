@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -34,14 +35,12 @@ public class NetworkHostSpawnTests {
     public IEnumerator Host_SpawnsGroundedCarAtSlot0_AndDrives () {
         _log = new LogGuard();
         Assert.NotNull(GnmType); Assert.NotNull(CarType);
-        // Test isolation: earlier tests lazily create a standalone SteamManager (via SteamManager.Instance).
-        // MainMenu's "networkmanager" GameObject also carries a SteamManager whose Awake does
-        // Destroy(gameObject) when another instance exists -- which takes NetworkManager and
-        // GameNetworkManager down with it (known bug, see report). Clear it so this test is order-independent.
+        // Regression: touch SteamManager before MainMenu loads, as earlier code/tests do, so a
+        // standalone instance exists. MainMenu's "networkmanager" GameObject also carries a
+        // SteamManager; that duplicate must not destroy NetworkManager/GameNetworkManager with it.
         var steamType = Type.GetType("SteamManager, Assembly-CSharp");
-        if (steamType != null)
-            foreach (Component c in UnityEngine.Object.FindObjectsByType(steamType, FindObjectsSortMode.None))
-                UnityEngine.Object.DestroyImmediate(c.gameObject);
+        Assert.NotNull(steamType);
+        steamType.GetProperty("Initialized", BindingFlags.Public | BindingFlags.Static).GetValue(null);
         yield return null;
         yield return SceneManager.LoadSceneAsync("MainMenu", LoadSceneMode.Single);
         for (int f = 0; f < 6; f++) {
@@ -56,6 +55,8 @@ public class NetworkHostSpawnTests {
         Debug.Log($"[NetworkHostSpawnTests] after delay: Singleton={(Unity.Netcode.NetworkManager.Singleton != null)}, managers={UnityEngine.Object.FindObjectsByType<Unity.Netcode.NetworkManager>(FindObjectsSortMode.None).Length}");
         var gnm = GnmType.GetProperty("Instance").GetValue(null);
         Assert.NotNull(gnm, "GameNetworkManager.Instance missing in MainMenu");
+        Assert.AreEqual(1, UnityEngine.Object.FindObjectsByType(steamType, FindObjectsSortMode.None).Length,
+            "duplicate SteamManager should remove itself and leave exactly one");
         // Use a free port so this doesn't collide with a running game host on 7777.
         var l = new System.Net.Sockets.UdpClient(0); ushort port = (ushort)((System.Net.IPEndPoint)l.Client.LocalEndPoint).Port; l.Close();
         GnmType.GetField("_port", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).SetValue(gnm, port);
