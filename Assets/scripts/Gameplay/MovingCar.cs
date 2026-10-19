@@ -629,11 +629,54 @@ public class MovingCar : NetworkBehaviour {
 		ApplyOfflineSceneTestState();
 	}
 
+	// Server-chosen spawn pose, written before Spawn() so it rides in the spawn
+	// payload. Owner-authoritative NetworkTransform means a remote owner would
+	// otherwise simulate from wherever its local instance was created.
+	readonly NetworkVariable<bool>       _hasNetSpawnPose = new NetworkVariable<bool>();
+	readonly NetworkVariable<Vector3>    _netSpawnPosition = new NetworkVariable<Vector3>();
+	readonly NetworkVariable<Quaternion> _netSpawnRotation = new NetworkVariable<Quaternion>(Quaternion.identity);
+
+	/// <summary>Server only: set before NetworkObject.Spawn*.</summary>
+	public void SetServerSpawnPose (Vector3 position, Quaternion rotation) {
+		_netSpawnPosition.Value = position;
+		_netSpawnRotation.Value = rotation;
+		_hasNetSpawnPose.Value  = true;
+	}
+
+	void ApplyNetworkSpawnPose () {
+		if (!_hasNetSpawnPose.Value) return;
+		Vector3    pos = _netSpawnPosition.Value;
+		Quaternion rot = _netSpawnRotation.Value;
+		if (!IsServer)
+			Debug.Log($"MovingCar: owner applying server spawn pose {pos} (local instance was at {transform.position}).");
+		transform.SetPositionAndRotation(pos, rot);
+		if (body != null) {
+			body.position = pos;
+			body.rotation = rot;
+			body.linearVelocity  = Vector3.zero;
+			body.angularVelocity = Vector3.zero;
+		}
+		velocity = Vector3.zero;
+		_initialSpawnPosition = pos;
+		_initialSpawnRotation = rot;
+		Physics.SyncTransforms();
+		if (gravityCar != null) SyncYawFromTransform();
+	}
+
 	public override void OnNetworkSpawn () {
 		ResetRemoteSkidTracking();
 
+		// The offline scene-test car is spawned with the scene and owned by the server;
+		// GameNetworkManager despawns it, but until then it must not drive with host input.
+		if (NetworkObject.IsSceneObject == true && !NetworkObject.IsPlayerObject) {
+			SetInputEnabled(false);
+			body.isKinematic = true;
+			return;
+		}
+
 		if (HasLocalControl) {
 #if !UNITY_SERVER || UNITY_EDITOR
+			ApplyNetworkSpawnPose();
 			body.isKinematic = false;
 			SetInputEnabled(true);
 			// Register this car as the local player so RaceRuntime HUD and

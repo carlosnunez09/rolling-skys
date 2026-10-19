@@ -130,8 +130,9 @@ public class RaceRuntime : NetworkBehaviour {
     public void LoadTrackAndStart (WaypointPath path, string trackName, int totalLaps, float countdownSeconds) {
         if (path == null) return;
 
-        // Ignore re-entry to the same active track mid-race
-        if (Phase == RacePhase.Racing && _activePath == path) return;
+        // Ignore re-entry to the same active track mid-race or while counting down;
+        // restarting the countdown would keep the player's input locked.
+        if ((Phase == RacePhase.Racing || Phase == RacePhase.Countdown) && _activePath == path) return;
 
         ActiveTrackName   = trackName;
         _activePath       = path;
@@ -155,6 +156,11 @@ public class RaceRuntime : NetworkBehaviour {
     public void RebuildRacerList () {
         BuildRacerList();
     }
+
+    /// Once a local player car is registered only it may start a race: the countdown
+    /// locks that car's input, so other cars (remote players' ghosts, extra local test
+    /// cars) must not trigger it. Without a local player (dedicated server) any car can.
+    public bool CanStartRace (MovingCar car) => _playerCar == null || car == _playerCar;
 
     /// <summary>
     /// Called by the local owner's MovingCar after it spawns on the network so the

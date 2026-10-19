@@ -320,7 +320,7 @@ public class CarConfiguratorUI : MonoBehaviour {
 
         _saveAsNewButton = CreateButton(bottomBar.transform, "SaveNewBtn", "+ Save As New Profile", new Color(0.14f, 0.42f, 0.28f));
         _resetButton = CreateButton(bottomBar.transform, "ResetBtn", "↺ Reset Defaults", new Color(0.48f, 0.28f, 0.12f));
-        _doneButton = CreateButton(bottomBar.transform, "DoneBtn", "✔ Done / Back [B]", new Color(0.18f, 0.25f, 0.38f));
+        _doneButton = CreateButton(bottomBar.transform, "DoneBtn", "Done / Back [B]", new Color(0.18f, 0.25f, 0.38f));
 
         _saveAsNewButton.onClick.AddListener(SaveAsNewProfile);
         _resetButton.onClick.AddListener(ResetToDefaults);
@@ -340,7 +340,7 @@ public class CarConfiguratorUI : MonoBehaviour {
         _footerStatusText.fontSize = 12;
         _footerStatusText.alignment = TextAlignmentOptions.Center;
         _footerStatusText.color = new Color(0.55f, 0.65f, 0.75f);
-        _footerStatusText.text = "🎮 [D-Pad Up/Down] Select Parameter  •  [D-Pad Left/Right] Adjust Value  •  [LB/RB] Switch Tabs  •  [B] Back";
+        _footerStatusText.text = "[D-Pad Up/Down] Select Parameter  •  [D-Pad Left/Right] Adjust Value  •  [LB/RB] Switch Tabs  •  [B] Back";
 
         _panelRoot = root;
 

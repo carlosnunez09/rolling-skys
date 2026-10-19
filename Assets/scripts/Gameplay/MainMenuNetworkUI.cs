@@ -393,9 +393,9 @@ public class MainMenuNetworkUI : MonoBehaviour {
         if (_controllerHintText == null) return;
         bool isPad = Gamepad.current != null;
         if (isPad) {
-            _controllerHintText.text = "<color=#1FE0FF>🎮 Controller:</color> [D-Pad / Left Stick] Navigate   [A] Select   [B] Back / Disconnect";
+            _controllerHintText.text = "<color=#1FE0FF>Controller:</color> [D-Pad / Left Stick] Navigate   [A] Select   [B] Back / Disconnect";
         } else {
-            _controllerHintText.text = "<color=#8E9CAE>⌨ Keyboard:</color> [Arrows / WASD] Navigate   [Enter / Space] Select   [Esc] Cancel / Quit";
+            _controllerHintText.text = "<color=#8E9CAE>Keyboard:</color> [Arrows / WASD] Navigate   [Enter / Space] Select   [Esc] Cancel / Quit";
         }
     }
 }

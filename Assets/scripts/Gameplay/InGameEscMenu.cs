@@ -550,7 +550,7 @@ public class InGameEscMenu : MonoBehaviour {
         profInfoObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 18f);
 
         Button addProfileBtn = CreateButton(_panel, "AddProfileButton", "+ Clone & Add Profile", new Color(0.14f, 0.38f, 0.28f));
-        Button configBtn = CreateButton(_panel, "ConfiguratorButton", "🛠 In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
+        Button configBtn = CreateButton(_panel, "ConfiguratorButton", "In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
 
         if (_resumeButton != null) {
             int idx = _resumeButton.transform.GetSiblingIndex();
@@ -732,7 +732,7 @@ public class InGameEscMenu : MonoBehaviour {
         profInfoObj.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 18f);
 
         Button addProfileBtn = CreateButton(panelObj.transform, "AddProfileButton", "+ Clone & Add Profile", new Color(0.14f, 0.38f, 0.28f));
-        Button configBtn = CreateButton(panelObj.transform, "ConfiguratorButton", "🛠 In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
+        Button configBtn = CreateButton(panelObj.transform, "ConfiguratorButton", "In-Depth Car Configurator", new Color(0.1f, 0.42f, 0.45f));
 
         Button respawnBtn = CreateButton(panelObj.transform, "RespawnButton", "Reset Car (Respawn)", new Color(0.18f, 0.22f, 0.32f));
         Button inviteBtn = CreateButton(panelObj.transform, "InviteButton", "Invite Friends (Steam)", new Color(0.1f, 0.48f, 0.65f));
@@ -742,7 +742,7 @@ public class InGameEscMenu : MonoBehaviour {
         GameObject hintObj = new GameObject("HintText", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
         hintObj.transform.SetParent(panelObj.transform, false);
         TextMeshProUGUI hint = hintObj.GetComponent<TextMeshProUGUI>();
-        hint.text = "🎮 [D-Pad/Stick] Move  [A] Select  [LB/RB] Quick Profile  [B/START] Resume";
+        hint.text = "Controller: [D-Pad/Stick] Move  [A] Select  [LB/RB] Quick Profile  [B/START] Resume";
         hint.fontSize = 12;
         hint.alignment = TextAlignmentOptions.Center;
         hint.color = new Color(0.6f, 0.68f, 0.78f);

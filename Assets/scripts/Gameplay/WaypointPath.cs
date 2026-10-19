@@ -33,7 +33,7 @@ public class WaypointPath : MonoBehaviour {
 
     // Direction from waypoint[index] toward the next waypoint.
     public Vector3 GetWaypointForward(int index) {
-        if (_waypoints.Count < 2) return Vector3.forward;
+        if (_waypoints.Count < 2 || index < 0 || index >= _waypoints.Count) return Vector3.forward;
         int nextIdx = GetNextIndex(index);
         if (nextIdx == index) return Vector3.forward;
         Waypoint a = _waypoints[index];
